@@ -1,0 +1,18 @@
+model_list:
+  # Public alias teammates send as "model": "kimi-k2".
+  # Upstream model defaults to kimi-k2.5 — change if the dashboard exposes a different name.
+  - model_name: kimi-k2
+    litellm_params:
+      model: moonshot/kimi-k2.5
+      api_key: os.environ/MOONSHOT_API_KEY
+      api_base: os.environ/MOONSHOT_API_BASE
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  # Models are defined here in config, not stored in the DB.
+  store_model_in_db: false
+
+litellm_settings:
+  # Silently drop unsupported OpenAI params instead of erroring (eases tool compatibility).
+  drop_params: true
