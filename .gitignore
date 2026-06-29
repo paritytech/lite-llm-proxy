@@ -1,0 +1,10 @@
+# Secrets — real values live only on the box
+.env
+
+# Local scratch / backups
+backups/
+*.sql
+*.sql.gz
+
+# OS noise
+.DS_Store
