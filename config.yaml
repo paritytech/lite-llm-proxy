@@ -1,4 +1,5 @@
 model_list:
+  # ---- Kimi / Moonshot (platform.kimi.ai, base api.moonshot.ai/v1) ----
   # General-purpose default. Teammates send "model": "kimi-k2".
   - model_name: kimi-k2
     litellm_params:
@@ -21,6 +22,72 @@ model_list:
       api_base: os.environ/MOONSHOT_API_BASE
       input_cost_per_token: 0.00000095
       output_cost_per_token: 0.000004
+
+  # ---- OpenRouter (base openrouter.ai/api/v1) ----
+  # Curated aliases for common models. Costs pinned from OpenRouter's own pricing
+  # (per-token USD) so budgets enforce regardless of LiteLLM's built-in map.
+  - model_name: claude-sonnet
+    litellm_params:
+      model: openrouter/anthropic/claude-sonnet-4.6
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+  - model_name: claude-opus
+    litellm_params:
+      model: openrouter/anthropic/claude-opus-4.8
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.000005
+      output_cost_per_token: 0.000025
+  - model_name: gpt-5
+    litellm_params:
+      model: openrouter/openai/gpt-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.000005
+      output_cost_per_token: 0.00003
+  - model_name: gpt-5-mini
+    litellm_params:
+      model: openrouter/openai/gpt-5.4-mini
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.0000045
+  - model_name: gemini-pro
+    litellm_params:
+      model: openrouter/google/gemini-2.5-pro
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.00000125
+      output_cost_per_token: 0.00001
+  - model_name: gemini-flash
+    litellm_params:
+      model: openrouter/google/gemini-3.5-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.0000015
+      output_cost_per_token: 0.000009
+  - model_name: deepseek
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v3.2
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.0000002288
+      output_cost_per_token: 0.0000003432
+  - model_name: deepseek-r1
+    litellm_params:
+      model: openrouter/deepseek/deepseek-r1
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.0000007
+      output_cost_per_token: 0.0000025
+  - model_name: llama-4-maverick
+    litellm_params:
+      model: openrouter/meta-llama/llama-4-maverick
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000006
+
+  # Wildcard catch-all: any other OpenRouter model by its full ID, e.g.
+  #   "model": "openrouter/qwen/qwen3-max". Cost tracking for these relies on
+  #   LiteLLM's price map (unknown models may log $0 — pin them above if needed).
+  - model_name: openrouter/*
+    litellm_params:
+      model: openrouter/*
+      api_key: os.environ/OPENROUTER_API_KEY
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
