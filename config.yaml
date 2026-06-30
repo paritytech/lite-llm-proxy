@@ -1,11 +1,26 @@
 model_list:
-  # Public alias teammates send as "model": "kimi-k2".
-  # Upstream model defaults to kimi-k2.5 — change if the dashboard exposes a different name.
+  # General-purpose default. Teammates send "model": "kimi-k2".
   - model_name: kimi-k2
+    litellm_params:
+      model: moonshot/kimi-k2.6
+      api_key: os.environ/MOONSHOT_API_KEY
+      api_base: os.environ/MOONSHOT_API_BASE
+  # Cheaper / cost-sensitive workflows.
+  - model_name: kimi-k2.5
     litellm_params:
       model: moonshot/kimi-k2.5
       api_key: os.environ/MOONSHOT_API_KEY
       api_base: os.environ/MOONSHOT_API_BASE
+  # Strongest coding model (thinking always on). It is newer than LiteLLM's built-in
+  # price map, which would track its spend as $0 — so pin the cost explicitly
+  # (platform.kimi.ai: $0.95 / 1M input, $4.00 / 1M output) so budgets enforce.
+  - model_name: kimi-k2.7-code
+    litellm_params:
+      model: moonshot/kimi-k2.7-code
+      api_key: os.environ/MOONSHOT_API_KEY
+      api_base: os.environ/MOONSHOT_API_BASE
+      input_cost_per_token: 0.00000095
+      output_cost_per_token: 0.000004
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
