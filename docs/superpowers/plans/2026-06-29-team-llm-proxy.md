@@ -1,5 +1,9 @@
 # Team LLM Proxy Implementation Plan
 
+> **Status (post-ship):** Point-in-time plan. The system is live at **`https://llm.substrate.dev`**
+> (the `sslip.io` host referenced below was the bootstrap only), and the model set now includes
+> OpenRouter as well as Kimi. See `README.md` / `RUNBOOK.md` for the current authoritative state.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stand up a public HTTPS LiteLLM proxy on the dedicated baremetal box that gives 5–20 Parity teammates per-user virtual keys, budgets, and usage tracking against the shared Kimi (Moonshot AI) subscription.

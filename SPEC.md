@@ -3,8 +3,9 @@
 A self-hosted **LiteLLM proxy** giving 5–20 Parity teammates rate-limited, budgeted,
 per-user access to a shared **Kimi (Moonshot AI)** API subscription, fronted by HTTPS.
 
-Status: **design approved, not yet implemented.** Next step is an implementation plan
-(`writing-plans`) then build-out.
+Status: **shipped & live** at `https://llm.substrate.dev` (Caddy + LiteLLM + Postgres on the
+baremetal box). It now also fronts **OpenRouter** models alongside Kimi. This document captures
+the original design; `README.md` and `RUNBOOK.md` are the current, authoritative references.
 
 ---
 

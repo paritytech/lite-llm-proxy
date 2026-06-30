@@ -192,6 +192,10 @@ rm /tmp/ct.txt
   fetched from GitHub at startup and refreshed daily by the reload cron. A model too new for the
   map (e.g. `kimi-k2.7-code` at launch) needs an explicit `input_/output_cost_per_token` pin in
   `config.yaml` until the map catches up — then the pin can be removed.
+- **Wildcard caveat:** a model reached via `openrouter/*` that LiteLLM has no price for may
+  under-meter on *streaming* requests (OpenRouter's inline cost is dropped when streaming, and
+  there's no map entry to fall back to). The OpenRouter key's own **credit limit is the backstop**
+  for this. Curated aliases and all non-streaming calls are unaffected.
 
 ## To change models / prices later
 
