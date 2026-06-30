@@ -4,7 +4,7 @@ Shared, budgeted access to **Kimi (Moonshot AI)** and **OpenRouter** (Claude, GP
 DeepSeek, Llama, … ~400+ models) for Parity teammates via a self-hosted
 [LiteLLM](https://docs.litellm.ai) proxy. OpenAI-compatible API over HTTPS.
 
-- **Base URL:** `https://llm.195-154-218-5.sslip.io`  *(will move to a `*.substrate.dev` host — see below)*
+- **Base URL:** `https://llm.substrate.dev`
 - **Auth:** your personal virtual key (`sk-...`), issued by the admin. Keep it secret; it carries your budget.
 
 ## Models
@@ -33,7 +33,7 @@ Send one of these as the `"model"` field:
 
 ```python
 from openai import OpenAI
-client = OpenAI(base_url="https://llm.195-154-218-5.sslip.io", api_key="sk-YOUR-KEY")
+client = OpenAI(base_url="https://llm.substrate.dev", api_key="sk-YOUR-KEY")
 resp = client.chat.completions.create(
     model="claude-sonnet",   # or kimi-k2, gpt-5, gemini-pro, ...
     messages=[{"role": "user", "content": "Hello!"}],
@@ -44,7 +44,7 @@ print(resp.choices[0].message.content)
 ## Use it from the shell / CI
 
 ```bash
-curl https://llm.195-154-218-5.sslip.io/v1/chat/completions \
+curl https://llm.substrate.dev/v1/chat/completions \
   -H "Authorization: Bearer $LLM_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"kimi-k2","messages":[{"role":"user","content":"Hello!"}]}'
@@ -58,14 +58,13 @@ requests are rejected until the 30-day window resets. Ask the admin to raise it 
 
 ## Admin (operator only)
 
-- Admin UI: `https://llm.195-154-218-5.sslip.io/ui` (log in with the master key).
+- Admin UI: `https://llm.substrate.dev/ui` (log in with the master key).
 - Mint a key: `POST /key/generate` with `models`, `max_budget`, `budget_duration`, `rpm_limit`, `user_id`.
   Omit `models` (or pass `["all-proxy-models"]`) to allow every model above.
 - Revoke a key: `POST /key/delete`.
 - Usage: `GET /key/info?key=...` or the UI.
 
-## Hostname migration
+## Hostname
 
-The base URL will change from the temporary `sslip.io` host to a `*.substrate.dev` subdomain
-(DevOps ticket #5421). **Your key keeps working** — only the base URL changes. The new URL will
-be announced before the cutover.
+The permanent base URL is `https://llm.substrate.dev` (DevOps ticket #5421). It replaced the
+temporary `sslip.io` bootstrap host once DNS was live.

@@ -106,7 +106,7 @@ docker compose logs caddy | grep -i certificate | tail -5
 ```
 ```bash
 # 6. Verify HTTPS + liveness (real cert, no -k flag)
-curl -sS https://llm.195-154-218-5.sslip.io/health/liveliness
+curl -sS https://llm.substrate.dev/health/liveliness
 #    Expect: "I'm alive!"
 ```
 
@@ -119,11 +119,11 @@ MASTER=$(grep '^LITELLM_MASTER_KEY=' /opt/team-llm/.env | cut -d= -f2)
 ```
 ```bash
 # Kimi
-curl -sS https://llm.195-154-218-5.sslip.io/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"Reply with exactly: pong"}]}'
+curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"Reply with exactly: pong"}]}'
 ```
 ```bash
 # OpenRouter (curated alias + wildcard)
-curl -sS https://llm.195-154-218-5.sslip.io/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"claude-sonnet","messages":[{"role":"user","content":"Reply with exactly: pong"}]}'
+curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"claude-sonnet","messages":[{"role":"user","content":"Reply with exactly: pong"}]}'
 #    Expect: JSON with choices[0].message.content. The OpenRouter response includes a real
 #    "cost" field — that is what LiteLLM records (no hardcoded prices needed for OpenRouter).
 ```
@@ -134,26 +134,26 @@ curl -sS https://llm.195-154-218-5.sslip.io/v1/chat/completions -H "Authorizatio
 
 ```bash
 # 1. Mint a scoped test key
-curl -sS https://llm.195-154-218-5.sslip.io/key/generate -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"key_alias":"smoke-test","models":["kimi-k2"],"max_budget":1,"budget_duration":"30d","rpm_limit":5,"user_id":"smoke@parity.io"}'
+curl -sS https://llm.substrate.dev/key/generate -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"key_alias":"smoke-test","models":["kimi-k2"],"max_budget":1,"budget_duration":"30d","rpm_limit":5,"user_id":"smoke@parity.io"}'
 ```
 ```bash
 TESTKEY=sk-...    # paste returned key
 ```
 ```bash
 # 2. It works
-curl -sS https://llm.195-154-218-5.sslip.io/v1/chat/completions -H "Authorization: Bearer $TESTKEY" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"Reply with exactly: ok"}]}'
+curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $TESTKEY" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"Reply with exactly: ok"}]}'
 ```
 ```bash
 # 3. Spend tracked  (look for "spend" > 0)
-curl -sS "https://llm.195-154-218-5.sslip.io/key/info?key=$TESTKEY" -H "Authorization: Bearer $MASTER"
+curl -sS "https://llm.substrate.dev/key/info?key=$TESTKEY" -H "Authorization: Bearer $MASTER"
 ```
 ```bash
 # 4. Revoke
-curl -sS https://llm.195-154-218-5.sslip.io/key/delete -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d "{\"keys\":[\"$TESTKEY\"]}"
+curl -sS https://llm.substrate.dev/key/delete -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d "{\"keys\":[\"$TESTKEY\"]}"
 ```
 ```bash
 # 5. Revoked key is rejected
-curl -sS -o /dev/null -w "%{http_code}\n" https://llm.195-154-218-5.sslip.io/v1/chat/completions -H "Authorization: Bearer $TESTKEY" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"hi"}]}'
+curl -sS -o /dev/null -w "%{http_code}\n" https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $TESTKEY" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"hi"}]}'
 #    Expect: 401
 ```
 
@@ -209,7 +209,7 @@ dig +short <assigned-host>.substrate.dev AAAA   # -> 2001:bc8:1201:a2b:7ec2:55ff
 ```
 ```bash
 # 2. [laptop] Edit Caddyfile in the repo: change the one site-label line
-#       llm.195-154-218-5.sslip.io  ->  <assigned-host>.substrate.dev
+#       llm.substrate.dev  ->  <assigned-host>.substrate.dev
 #    then copy it to the box:
 rsync -av /Users/utkarsh/Desktop/Projects/lite-llm-proxy/Caddyfile cargo-remote:/opt/team-llm/Caddyfile
 ```

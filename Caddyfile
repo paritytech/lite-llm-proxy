@@ -2,8 +2,7 @@
 	email utkarsh.bhardwaj@parity.io
 }
 
-# v1 hostname — swap this single line to llm.substrate.dev after DNS goes live (Task 11).
-llm.195-154-218-5.sslip.io {
+llm.substrate.dev {
 	reverse_proxy litellm:4000
 	encode zstd gzip
 }
