@@ -1,0 +1,85 @@
+# AGENTS.md
+
+Operating guide for AI coding agents (Claude Code, Codex, Copilot, Cursor, etc.) working in this
+repository. Human contributors should read it too — it documents the non-obvious rules.
+
+## What this repo is
+
+The **deployment definition** for the Team LLM Proxy: a self-hosted [LiteLLM](https://docs.litellm.ai)
+gateway that gives Parity teammates budgeted, per-user access to Kimi (Moonshot AI) and OpenRouter
+models behind one OpenAI-compatible HTTPS API. It is a small ops repo — Docker Compose, a Caddyfile,
+a LiteLLM `config.yaml`, two shell scripts, and docs. **There is no application source code to build
+or test.** See `README.md` for the overview and `RUNBOOK.md` for operations.
+
+This config drives a **live, shared production service** at `https://llm.substrate.dev`. Treat
+changes accordingly.
+
+## Golden rules
+
+1. **Never commit secrets.** No real keys, passwords, or tokens in any tracked file. The real `.env`
+   lives only on the host (chmod 600) and is git-ignored. Only `.env.example` (placeholders) is
+   tracked. If you add a new secret, add it to `.env.example` with a `REPLACE_*` placeholder — never
+   a real value.
+2. **Keep the LiteLLM image tag pinned.** In `docker-compose.yml` the `litellm` image is a pinned
+   version (e.g. `:v1.90.0`), never `latest`/`main-latest` — LiteLLM ships breaking changes. To
+   upgrade, bump the tag deliberately and note it.
+3. **Never rotate `LITELLM_SALT_KEY` after launch.** It encrypts provider keys stored in Postgres;
+   rotating it invalidates them.
+4. **Don't run commands against the live host or push to GitHub on the user's behalf** unless they
+   explicitly ask in this session. Editing files here is safe; deploying, reloading Caddy, minting/
+   revoking keys, or filing tickets are real-world actions — propose them, don't perform them unasked.
+5. **SPDX headers on every new file.** See [License headers](#license-headers).
+
+## Conventions
+
+- **License headers:** every code/config file starts with the two-line SPDX header (below). Markdown
+  docs and `LICENSE` are exempt.
+- **Comments:** the existing files are heavily and deliberately commented — comments explain *why*
+  (e.g. why a price is pinned, why a port isn't published). Match that density; keep the rationale
+  when you edit a line it explains.
+- **Hostname** lives in exactly one place: the site label in `Caddyfile`. Changing the public URL is
+  a one-line edit there plus a Caddy reload (see `RUNBOOK.md` § F).
+- **Models & pricing** live in `config.yaml`. Prefer letting OpenRouter's live cost and LiteLLM's
+  auto-fetched price map drive spend; only hardcode `input_/output_cost_per_token` for a model too
+  new for the map, and remove the pin once the map catches up.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `docker-compose.yml` | caddy + litellm + postgres stack. Only caddy publishes host ports. |
+| `Caddyfile` | TLS + reverse proxy. Site label = public hostname. |
+| `config.yaml` | LiteLLM model list (Kimi + OpenRouter aliases + `openrouter/*` wildcard) + settings. |
+| `.env.example` | Secrets template. Real `.env` is host-only, git-ignored. |
+| `scripts/backup.sh` | Nightly verified `pg_dump`, pruned after 14 days. |
+| `scripts/reload-costmap.sh` | Refresh LiteLLM price map from upstream (no restart). |
+| `RUNBOOK.md` | Authoritative step-by-step: provision → deploy → key lifecycle → DNS cutover. |
+| `SPEC.md` | Original design and rationale (background). |
+
+## Deploy model (so you don't suggest the wrong thing)
+
+- The host runs the stack from `/opt/team-llm`. The repo is **rsync'd** there, excluding `.env`,
+  `.git`, and `backups/`. There is no CI/CD pipeline — deploys are manual via the runbook.
+- `RUNBOOK.md` marks each step as run on the **box** or on the **[laptop]**. Respect that split.
+- To apply a config change: edit here → commit → rsync to the host →
+  `cd /opt/team-llm && docker compose up -d --force-recreate litellm`.
+
+## Making changes — checklist
+
+- [ ] Editing `config.yaml`? Keep YAML valid; preserve `os.environ/...` references (never inline a key).
+- [ ] Added a setting that needs a secret? Add a placeholder to `.env.example`.
+- [ ] New file? Add the SPDX header.
+- [ ] Changed deploy/ops behavior? Update `RUNBOOK.md` (and `README.md` if user-facing).
+- [ ] Bumped the LiteLLM tag? Confirm it's a real, stable release and note the date.
+
+## License headers
+
+Apache-2.0. Start each new code/config file with the comment syntax for that file type:
+
+```
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+```
+
+For shell scripts, place it immediately **after** the `#!/usr/bin/env bash` shebang. Markdown files
+and `LICENSE` do not get a header.

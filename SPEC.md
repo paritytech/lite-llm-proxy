@@ -11,8 +11,6 @@ the original design; `README.md` and `RUNBOOK.md` are the current, authoritative
 
 ## 1. Goals & requirements
 
-From the brainstorming conversation (see `context.md`):
-
 - Per-user **virtual API keys** (issue / revoke independently).
 - Per-user **budgets** and **usage tracking** (spend, request counts, limits).
 - **Admin powers** for the operator: add/remove teammates, set/adjust budgets, see usage.
@@ -33,8 +31,8 @@ server because it is idle, isolated, and has no chain-redeploy blast radius.
 
 - **OS:** Ubuntu 24.04.4 LTS
 - **CPU:** 24 cores (AMD EPYC 7272) · **RAM:** 125 GB (≈121 GB free) · **Disk:** 933 GB (≈539 GB free)
-- **Public IPv4:** `195.154.218.5` (bound to `enp65s0f0`)
-- **Public IPv6:** `2001:bc8:1201:a2b:7ec2:55ff:fead:a4fe`
+- **Public IPv4:** `<BOX_IPV4>` (bound to the public NIC)
+- **Public IPv6:** `<BOX_IPV6>`
 - **State at design time:** essentially empty — only sshd (22), systemd-resolve (53, localhost),
   and a Warp remote-server daemon (127.0.0.1:9277). Nothing on 80/443. `ufw` inactive. Docker NOT installed.
 
@@ -65,11 +63,11 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
 - **Firewall:** enable `ufw` → allow `22`, `80`, `443` only. LiteLLM (4000) and Postgres (5432)
   stay on the internal Docker network, never bound to the public interface.
 - **TLS:** Caddy auto-provisions a real Let's Encrypt cert.
-  - **v1 hostname (works today, zero cost):** `llm.195-154-218-5.sslip.io`
+  - **v1 hostname (works today, zero cost):** `llm.<ip-with-dashes>.sslip.io`
     (`sslip.io` resolves `<ip-with-dashes>.sslip.io` → that IP; ACME HTTP-01 over port 80).
-  - **Later:** swap to the assigned `*.substrate.dev` subdomain (see `DEVOPS-TICKET.md`).
-    One-line Caddyfile change + `docker compose exec caddy ...` reload. Virtual keys are unaffected;
-    only the base URL teammates use changes, so the cutover must be communicated.
+  - **Later (done):** swapped to the assigned `*.substrate.dev` subdomain — a one-line Caddyfile
+    change + Caddy reload. Virtual keys were unaffected; only the base URL teammates use changed,
+    so the cutover was communicated.
 - **Secrets** in `/opt/team-llm/.env` (chmod 600, NEVER committed):
   - `LITELLM_MASTER_KEY` — admin key (`sk-...`). Admin-only; mints/revokes virtual keys.
   - `LITELLM_SALT_KEY` — encrypts provider keys stored in the DB. **Do not rotate after launch**
@@ -128,13 +126,13 @@ exact **model name** from the operator's Kimi dashboard — e.g. `https://api.mo
 6. Mint a test virtual key with a small budget + rpm cap; verify gating, spend tracking, revoke.
 7. Add nightly `pg_dump` backup cron.
 8. Write teammate onboarding README (base URL, how to use their key with common tools).
-9. (Parallel) File `DEVOPS-TICKET.md`; once DNS is live, swap Caddy hostname to the substrate.dev
-   subdomain and announce the new base URL.
+9. (Parallel) File the DNS request with SRE; once DNS is live, swap Caddy hostname to the
+   substrate.dev subdomain and announce the new base URL.
 
 ---
 
-## 9. Open items
+## 9. Open items (all resolved at launch)
 
-- Confirm Kimi/Moonshot **base URL + model name** from the operator's dashboard.
-- Decide where the deployment repo is hosted (personal vs `paritytech/...`).
-- Confirm the desired `substrate.dev` subdomain label with SRE (they assign the convention).
+- ~~Confirm Kimi/Moonshot **base URL + model name** from the operator's dashboard.~~ → `api.moonshot.ai/v1`.
+- ~~Decide where the deployment repo is hosted.~~ → `paritytech/lite-llm-proxy`.
+- ~~Confirm the desired `substrate.dev` subdomain label with SRE.~~ → `llm.substrate.dev`.

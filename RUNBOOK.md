@@ -1,13 +1,12 @@
 # Box Runbook — Team LLM Proxy
 
-You are already SSH'd into the box (`cargo-remote`). **Run every command on the box**, top to
-bottom, unless a block is marked **[laptop]**. Full rationale per step lives in
-`docs/superpowers/plans/2026-06-29-team-llm-proxy.md` (Tasks 5–9, 11).
+You are already SSH'd into the box (`<box>` — your SSH alias for the server). **Run every command
+on the box**, top to bottom, unless a block is marked **[laptop]**. See `SPEC.md` for the design
+rationale behind each step.
 
 Notes:
-- **[laptop]** steps run in a terminal that is *not* inside the box, using your `cargo-remote`
-  SSH alias. The local repo is `/Users/utkarsh/Desktop/Projects/lite-llm-proxy`; the box dir is
-  `/opt/team-llm`.
+- **[laptop]** steps run in a terminal that is *not* inside the box, using your `<box>` SSH alias.
+  `<local-repo>` is your local checkout of this repo; the box dir is `/opt/team-llm`.
 - Commands assume a **sudo (non-root) user** on the box. Run them one line at a time (a chained
   paste can mangle `>` / `&&` in some terminals).
 
@@ -33,7 +32,7 @@ docker compose version
 # Add yourself to the docker group so docker AND the nightly crons run without sudo.
 # Then log out and back in (newgrp only affects the current shell and is lost on exit).
 sudo usermod -aG docker "$USER"
-exit            # then: ssh cargo-remote   (reconnect so the group is active)
+exit            # then: ssh <box>   (reconnect so the group is active)
 ```
 ```bash
 # After reconnecting, confirm no-sudo docker:
@@ -49,7 +48,7 @@ sudo ufw status verbose
 ```
 ```bash
 # [laptop] Confirm you are NOT locked out — open a NEW laptop terminal:
-ssh cargo-remote 'echo SSH_STILL_UP'
+ssh <box> 'echo SSH_STILL_UP'
 ```
 
 ---
@@ -64,7 +63,7 @@ sudo chown "$USER":"$USER" /opt/team-llm
 ```bash
 # 1. [laptop] Copy the repo to the box (excludes secrets + git history):
 rsync -av --exclude=.env --exclude=.git --exclude=backups \
-  /Users/utkarsh/Desktop/Projects/lite-llm-proxy/ cargo-remote:/opt/team-llm/
+  <local-repo>/ <box>:/opt/team-llm/
 ```
 ```bash
 # 2. Generate strong secrets and write .env (one postgres password, reused in DATABASE_URL).
@@ -208,14 +207,14 @@ Edit `config.yaml` locally → commit → rsync to the box (step B1) →
 
 ```bash
 # 1. Confirm DNS resolves to the box (run anywhere)
-dig +short <assigned-host>.substrate.dev A      # -> 195.154.218.5
-dig +short <assigned-host>.substrate.dev AAAA   # -> 2001:bc8:1201:a2b:7ec2:55ff:fead:a4fe
+dig +short <assigned-host>.substrate.dev A      # -> <BOX_IPV4>
+dig +short <assigned-host>.substrate.dev AAAA   # -> <BOX_IPV6>
 ```
 ```bash
 # 2. [laptop] Edit Caddyfile in the repo: change the one site-label line
 #       llm.substrate.dev  ->  <assigned-host>.substrate.dev
 #    then copy it to the box:
-rsync -av /Users/utkarsh/Desktop/Projects/lite-llm-proxy/Caddyfile cargo-remote:/opt/team-llm/Caddyfile
+rsync -av <local-repo>/Caddyfile <box>:/opt/team-llm/Caddyfile
 ```
 ```bash
 # 3. Reload (on box)

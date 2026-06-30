@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
 # Nightly pg_dump of the LiteLLM database to local disk, pruned after 14 days.
 # Dumps to a temp file and verifies gzip integrity before atomically moving it into
 # place, so a failed/partial dump never lands as a "backup" — and the prune only runs
