@@ -1,0 +1,51 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI validation for the deployment repo. There is no build or test suite here —
+# "verification" for this repo means: YAML parses, shell scripts pass shellcheck,
+# every code/config file carries the SPDX header, and no secret ever lands in git.
+# This automates exactly that checklist on every push/PR.
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: YAML parses (config.yaml, docker-compose.yml, workflows)
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, yaml
+          files = ["config.yaml", "docker-compose.yml", *glob.glob(".github/workflows/*.yml")]
+          for f in files:
+              yaml.safe_load(open(f))
+              print(f"ok: {f}")
+          EOF
+
+      - name: shellcheck scripts
+        run: shellcheck scripts/*.sh
+
+      - name: SPDX header present on code/config files
+        run: |
+          missing=0
+          for f in $(git ls-files '*.sh' '*.yml' '*.yaml' 'Caddyfile'); do
+            head -3 "$f" | grep -q 'SPDX-License-Identifier: Apache-2.0' \
+              || { echo "missing SPDX header: $f"; missing=1; }
+          done
+          exit $missing
+
+      - name: No secrets in the tree
+        run: |
+          # .env must never be tracked.
+          if git ls-files | grep -qx '.env'; then echo ".env is tracked!"; exit 1; fi
+          # No real-looking API keys (sk-<24+ chars>); REPLACE_* placeholders are fine.
+          if git grep -nE 'sk-(or-v1-)?[A-Za-z0-9]{24,}' -- ':!*.md'; then
+            echo "possible real key committed!"; exit 1
+          fi
+          echo "ok: no secrets"

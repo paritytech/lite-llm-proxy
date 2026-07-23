@@ -21,11 +21,13 @@ reverse-proxy and proxy config, operational scripts, and runbook. No application
   - [From code (OpenAI SDK)](#from-code-openai-sdk)
   - [From the shell / CI](#from-the-shell--ci)
   - [Budgets & limits](#budgets--limits)
+  - [Logging & privacy](#logging--privacy)
 - [For operators](#for-operators)
   - [Architecture](#architecture)
   - [Repository layout](#repository-layout)
   - [Deploy & operate](#deploy--operate)
   - [Admin tasks](#admin-tasks)
+  - [Request logging & training corpus](#request-logging--training-corpus)
   - [How pricing stays accurate](#how-pricing-stays-accurate)
 - [Security model](#security-model)
 - [License](#license)
@@ -85,6 +87,32 @@ In CI, store your key as a secret named `LLM_KEY` (or similar) — never commit 
 Each key has a monthly `max_budget` and an rpm cap, spanning all models. When you hit your budget,
 requests are rejected until the 30-day window resets. Ask the admin to raise it if you need more.
 
+### Logging & privacy
+
+**Your full prompts and responses are logged.** The proxy stores every request/response body,
+which we use to build a training corpus for internal AI models. Concretely:
+
+- Recent requests (≤90 days) are browsable by admins in the proxy UI (per-request drill-down).
+- A nightly job exports the day's requests to a compressed archive kept indefinitely on the
+  server, as training data.
+
+**Don't paste secrets into prompts** (they'd be captured like everything else — this is a good
+rule with any LLM provider, ours included).
+
+**Opting out per request:** send `"no-log": true` in the request body and that request's message
+content is excluded from logging. With the OpenAI SDK:
+
+```python
+resp = client.chat.completions.create(
+    model="claude-sonnet",
+    messages=[{"role": "user", "content": "..."}],
+    extra_body={"no-log": True},
+)
+```
+
+Spend/budget accounting still happens for opted-out requests — only the message content is
+excluded. If you want an always-opt-out key instead of per-request flags, ask the admin.
+
 ---
 
 ## For operators
@@ -115,6 +143,8 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
 | `.env.example` | Template for the real `.env` (secrets) that lives only on the host. |
 | `scripts/backup.sh` | Nightly `pg_dump` of the LiteLLM database, verified and pruned. |
 | `scripts/reload-costmap.sh` | Refresh LiteLLM's price map from upstream (no restart). |
+| `scripts/export-logs.sh` | Nightly export of request logs (incl. prompts) to gzipped JSONL — the training corpus. |
+| `.github/workflows/validate.yml` | CI: YAML parses, shellcheck, SPDX headers, no secrets committed. |
 | `RUNBOOK.md` | Step-by-step provisioning, deploy, key lifecycle, and DNS cutover. |
 | `SPEC.md` | The original design and rationale (background reference). |
 
@@ -132,13 +162,45 @@ To change models or settings: edit `config.yaml`, commit, rsync to the host, the
 
 ### Admin tasks
 
-- **Admin UI:** `https://llm.substrate.dev/ui` (log in with the master key).
+- **Admin UI:** `https://llm.substrate.dev/ui` (log in with `UI_USERNAME`/`UI_PASSWORD` from the
+  host `.env`; the master key also works).
 - **Mint a key:** `POST /key/generate` with `models`, `max_budget`, `budget_duration`, `rpm_limit`,
   `user_id`. Omit `models` (or pass `["all-proxy-models"]`) to allow every model above.
 - **Revoke a key:** `POST /key/delete`.
 - **Usage:** `GET /key/info?key=...` or the UI.
+- **Request logs:** the UI's **Logs** page shows per-request drill-down, including full
+  prompt/response bodies (last ~90 days).
 
 See `RUNBOOK.md` § D for the full mint → use → track → revoke walkthrough.
+
+### Request logging & training corpus
+
+Full request/response bodies are captured to build a training corpus (teammate-facing details
+and the opt-out are in [Logging & privacy](#logging--privacy) above). The data flow:
+
+```
+request ──> litellm ──> Postgres LiteLLM_SpendLogs        (hot store, auto-pruned after 90d,
+                              │                            browsable in /ui Logs)
+                              └─ nightly export-logs.sh ─> $LOG_EXPORT_DIR/spendlogs-<date>.jsonl.gz
+                                                           (durable corpus, kept forever by default)
+```
+
+- **Capture** is `store_prompts_in_spend_logs: true` in `config.yaml`.
+- **Postgres retention** is `maximum_spend_logs_retention_period: "90d"` in `config.yaml` —
+  LiteLLM auto-deletes older rows daily, bounding DB growth. Pruning loses nothing: the export
+  runs nightly, long before rows age out.
+- **The corpus** is one gzipped JSONL file per UTC day (whole SpendLogs rows, schema-agnostic),
+  written by `scripts/export-logs.sh` (cron). Location `LOG_EXPORT_DIR` and optional pruning
+  `LOG_EXPORT_RETENTION_DAYS` are set in the host `.env` — retarget to a mounted datastore by
+  changing one line.
+- **Durability:** the corpus is a plain host directory (outside Docker) and Postgres lives in the
+  `postgres_data` named volume — both survive reboots, `docker compose up -d` redeploys, and
+  image bumps. Never run `docker compose down -v` (`-v` deletes the volumes).
+- **Sizing** (20 engineers): moderate use ≈ 360 MB/day raw → ~70 MB/day gzipped ≈ 26 GB/year of
+  corpus + ~32 GB of Postgres at 90d retention. Heavy agentic use ≈ 3 GB/day raw → ~600 MB/day
+  gzipped ≈ 220 GB/year; at that rate drop the Postgres retention to 30d and plan corpus off-box
+  archival after ~a year. The export cron logs `df -h` nightly so growth is visible in
+  `logs/export.log`.
 
 ### How pricing stays accurate
 
@@ -161,6 +223,9 @@ See `RUNBOOK.md` § D for the full mint → use → track → revoke walkthrough
 - **TLS everywhere** via Caddy + Let's Encrypt.
 - **`LITELLM_SALT_KEY` must not be rotated after launch** — it encrypts provider keys stored in the
   DB, and rotating it invalidates them.
+- **Request logs contain teammates' prompts** — treat the Postgres volume and `LOG_EXPORT_DIR`
+  as sensitive. Log access = admin access (`/ui` login or shell on the box); the corpus never
+  leaves the server unless deliberately copied for training.
 
 ---
 

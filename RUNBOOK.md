@@ -61,8 +61,8 @@ sudo mkdir -p /opt/team-llm
 sudo chown "$USER":"$USER" /opt/team-llm
 ```
 ```bash
-# 1. [laptop] Copy the repo to the box (excludes secrets + git history):
-rsync -av --exclude=.env --exclude=.git --exclude=backups \
+# 1. [laptop] Copy the repo to the box (excludes secrets, git history, and box-side data):
+rsync -av --exclude=.env --exclude=.git --exclude=backups --exclude=logs \
   <local-repo>/ <box>:/opt/team-llm/
 ```
 ```bash
@@ -226,3 +226,88 @@ docker compose logs caddy | grep -i certificate | tail -2
 # 4. Verify, then update README base URL and announce to teammates (keys unchanged)
 curl -sS https://<assigned-host>.substrate.dev/health/liveliness
 ```
+
+---
+
+## G. Request logging (prompts + responses → training corpus)
+
+Captures every request/response body to Postgres (browsable in `/ui` Logs, auto-pruned after
+90 days by LiteLLM) and exports each day to gzipped JSONL under `LOG_EXPORT_DIR` (kept forever
+by default — the training corpus). Full design in `README.md` § "Request logging & training
+corpus".
+
+> **Before enabling:** announce to the team that prompts/responses will be logged for model
+> training, and point them at README § "Logging & privacy" (includes the per-request opt-out).
+
+```bash
+# 1. [laptop] Ship the updated config + script to the box (same as B1):
+rsync -av --exclude=.env --exclude=.git --exclude=backups --exclude=logs \
+  <local-repo>/ <box>:/opt/team-llm/
+```
+```bash
+# 2. Add the new .env values (UI login + export config). Password is hidden while pasting:
+cd /opt/team-llm
+printf 'Choose a UI admin password then Enter: '
+read -r -s UIPW
+printf 'UI_USERNAME=admin\nUI_PASSWORD=%s\nLOG_EXPORT_DIR=/opt/team-llm/logs\nLOG_EXPORT_RETENTION_DAYS=\n' "$UIPW" >> .env
+unset UIPW
+grep -E '^(UI_USERNAME|LOG_EXPORT)' .env
+```
+```bash
+# 3. Apply (recreates only litellm; Postgres data + keys untouched):
+cd /opt/team-llm
+docker compose up -d --force-recreate litellm
+docker compose ps
+```
+```bash
+# 4. Verify capture: send one request, then check the newest log row has the message body.
+MASTER=$(grep '^LITELLM_MASTER_KEY=' /opt/team-llm/.env | cut -d= -f2)
+curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"log-capture-test"}]}' > /dev/null
+docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTime\", model, left(messages::text, 60) AS messages FROM \"LiteLLM_SpendLogs\" ORDER BY \"startTime\" DESC LIMIT 3;"
+#    Expect: newest row's messages column contains "log-capture-test".
+```
+```bash
+# 5. Verify the opt-out actually works on our pinned image (v1.90.0) before announcing it:
+curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"no-log-test"}],"no-log":true}' > /dev/null
+docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTime\", left(coalesce(messages::text,'<empty>'), 60) AS messages FROM \"LiteLLM_SpendLogs\" ORDER BY \"startTime\" DESC LIMIT 1;"
+#    Expect: NO "no-log-test" in the messages column. If the text DOES appear, the pinned
+#    LiteLLM version doesn't honor no-log for spend logs — remove the opt-out promise from
+#    README § "Logging & privacy" (or bump the pinned image) BEFORE announcing.
+```
+```bash
+# 6. Verify the export script, then install its cron (02:50 — after midnight UTC, before the
+#    03:30 costmap reload; exports *yesterday*, so today's test may legitimately say 0 rows —
+#    run it for today's date to see the rows from step 4/5):
+chmod +x /opt/team-llm/scripts/export-logs.sh
+/opt/team-llm/scripts/export-logs.sh "$(date -u +%F)"
+zcat /opt/team-llm/logs/spendlogs-$(date -u +%F).jsonl.gz | head -1
+crontab -l 2>/dev/null > /tmp/ct.txt || true
+echo '50 2 * * * /opt/team-llm/scripts/export-logs.sh >> /opt/team-llm/logs/export.log 2>&1' >> /tmp/ct.txt
+crontab /tmp/ct.txt
+crontab -l
+rm /tmp/ct.txt
+```
+```bash
+# 7. Verify UI login with username/password (not the master key): open
+#    https://llm.substrate.dev/ui and log in as admin / <UI_PASSWORD>. The Logs page
+#    shows per-request drill-down incl. message bodies.
+```
+```bash
+# 8. Disk watch (any time): corpus + DB growth vs free space.
+df -h /
+du -sh /opt/team-llm/logs /opt/team-llm/backups
+docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT pg_size_pretty(pg_database_size('litellm'));"
+docker system df
+```
+
+**Durability notes**
+- Postgres rows live in the `postgres_data` named volume; the corpus is a plain host dir
+  (`/opt/team-llm/logs`). Both survive reboots, `docker compose up -d` redeploys, and litellm
+  image bumps.
+- **Never run `docker compose down -v`** — `-v` deletes the volumes (keys, budgets, logs).
+  Plain `docker compose down` is safe.
+- The nightly `backup.sh` pg_dump includes the last 90 days of spend logs as a side effect;
+  the JSONL corpus is the long-term record.
+- **Retention knobs:** Postgres = `maximum_spend_logs_retention_period` in `config.yaml`
+  (redeploy litellm to apply); corpus = `LOG_EXPORT_RETENTION_DAYS` in `.env` (empty = forever).
+  At heavy usage (~3 GB/day raw) drop Postgres to `30d` — see README sizing table.

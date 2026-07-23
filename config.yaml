@@ -82,6 +82,20 @@ general_settings:
   # Models are defined here in config, not stored in the DB.
   store_model_in_db: false
 
+  # ---- Request logging (training corpus) ----
+  # Store full prompts + responses in the LiteLLM_SpendLogs table (Postgres), viewable
+  # per-request in the /ui Logs page. Purpose: build a corpus for model training.
+  # Teammates are informed (README "Logging & privacy") and can opt out per request by
+  # sending "no-log": true in the body.
+  store_prompts_in_spend_logs: true
+  # Auto-delete spend-log rows older than 90 days, checked once a day. This bounds
+  # Postgres growth only — nothing is lost: the durable corpus is the nightly JSONL
+  # export (scripts/export-logs.sh), which runs long before rows age out. To keep
+  # more/less in the hot store (UI browsing window), edit the period here and
+  # force-recreate litellm.
+  maximum_spend_logs_retention_period: "90d"
+  maximum_spend_logs_retention_interval: "1d"
+
 litellm_settings:
   # Silently drop unsupported OpenAI params instead of erroring (eases tool compatibility).
   drop_params: true
