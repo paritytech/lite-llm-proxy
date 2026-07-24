@@ -89,7 +89,7 @@ sed -i "s#sk-or-REPLACE_OPENROUTER#${ORK}#" .env
 unset ORK
 grep -c REPLACE .env
 #    Expect: 0   (no placeholders left).
-#    Models live in config.yaml (3 Kimi + curated OpenRouter + wildcard). For the China
+#    Models live in config.yaml (4 Kimi + curated OpenRouter + wildcard). For the China
 #    Kimi platform, change MOONSHOT_API_BASE to https://api.moonshot.cn/v1.
 ```
 ```bash
@@ -124,7 +124,8 @@ curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer
 # OpenRouter (curated alias + wildcard)
 curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"claude-sonnet","messages":[{"role":"user","content":"Reply with exactly: pong"}]}'
 #    Expect: JSON with choices[0].message.content. The OpenRouter response includes a real
-#    "cost" field — that is what LiteLLM records (no hardcoded prices needed for OpenRouter).
+#    "cost" field — that is what LiteLLM records on non-streaming calls like this one
+#    (streamed calls fall back to the price map / pins — see "Pricing model" below).
 ```
 
 ---
@@ -184,17 +185,31 @@ rm /tmp/ct.txt
 
 ---
 
-## Pricing model (how spend stays accurate without hardcoding)
+## Pricing model (how spend stays accurate, and why the UI can disagree with provider dashboards)
 
-- **OpenRouter** returns the real per-call cost; LiteLLM records that directly. No pins needed.
+- **OpenRouter** returns the real per-call cost; LiteLLM records that directly — **non-streaming
+  only**. Our pinned LiteLLM (≤ v1.93) drops the inline cost on **streaming** responses
+  (BerriAI/litellm#16021) and falls back to its price map. Curated aliases missing from the map
+  (`claude-opus`, `gpt-5`, `gpt-5-mini`, `gemini-flash`, `llama-4-maverick` as of 2026-07-23)
+  metered **$0 on streamed calls** until they were pinned in `config.yaml` at OpenRouter list
+  prices. The upstream fix (PR #32255) is in v1.94.0-rc only — once a stable ≥ v1.94.0 is pinned
+  in `docker-compose.yml`, remove those pins so the real per-call cost wins again.
 - **Kimi / Moonshot** does not return cost, so spend comes from LiteLLM's price map. The map is
   fetched from GitHub at startup and refreshed daily by the reload cron. A model too new for the
-  map (e.g. `kimi-k2.7-code` at launch) needs an explicit `input_/output_cost_per_token` pin in
-  `config.yaml` until the map catches up — then the pin can be removed.
-- **Wildcard caveat:** a model reached via `openrouter/*` that LiteLLM has no price for may
-  under-meter on *streaming* requests (OpenRouter's inline cost is dropped when streaming, and
-  there's no map entry to fall back to). The OpenRouter key's own **credit limit is the backstop**
-  for this. Curated aliases and all non-streaming calls are unaffected.
+  map (e.g. `kimi-k3`, `kimi-k2.7-code`) needs an explicit pin in `config.yaml` until the map
+  catches up. Pins must include `cache_read_input_token_cost`: Moonshot auto-caches context and
+  bills cache hits at ~1/5–1/10 of the input price, so an input/output-only pin overcounts
+  heavily on agentic workloads.
+- **Wildcard caveat:** a model reached via `openrouter/*` with no map entry meters $0 on
+  *streaming* requests (a wildcard can't carry a pin). The OpenRouter key's own **credit limit is
+  the backstop**. Fixed properly by the ≥ v1.94.0 upgrade above.
+- **Comparing dashboards:** expect small residual gaps even when everything above is right —
+  the LiteLLM UI buckets days in UTC while provider dashboards may use local time; OpenRouter's
+  billed cost includes its BYOK/provider fees which the price map doesn't model; and map-priced
+  streamed calls use list prices, not the routed provider's actual price. Large gaps (2×, or
+  models showing $0) mean a missing/stale map entry or a missing pin — check
+  `SELECT model, SUM(spend) FROM "LiteLLM_SpendLogs" GROUP BY 1` against the provider's own
+  per-model breakdown to find which model is drifting.
 
 ## To change models / prices later
 

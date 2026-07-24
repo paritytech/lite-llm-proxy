@@ -43,6 +43,7 @@ Send one of these as the `"model"` field:
 | `kimi-k2` | Kimi K2.6 (general default) |
 | `kimi-k2.5` | Kimi K2.5 (cheaper) |
 | `kimi-k2.7-code` | Kimi K2.7 Code (strongest coding) |
+| `kimi-k3` | Kimi K3 (flagship reasoning, 1M context, vision) |
 | `claude-sonnet` | Anthropic Claude Sonnet 4.6 |
 | `claude-opus` | Anthropic Claude Opus 4.8 |
 | `gpt-5` | OpenAI GPT-5.5 |
@@ -142,12 +143,17 @@ See `RUNBOOK.md` § D for the full mint → use → track → revoke walkthrough
 
 ### How pricing stays accurate
 
-- **OpenRouter** returns the real per-call cost; LiteLLM records it directly — no hardcoded prices.
+- **OpenRouter** returns the real per-call cost; LiteLLM records it directly on **non-streaming**
+  calls. On **streaming** calls our pinned LiteLLM drops that inline cost
+  ([BerriAI/litellm#16021](https://github.com/BerriAI/litellm/issues/16021)) and falls back to its
+  price map — so curated aliases missing from the map carry temporary price pins in `config.yaml`.
 - **Kimi / Moonshot** does not return cost, so spend comes from LiteLLM's price map, which is
   fetched from upstream at startup and refreshed daily by `scripts/reload-costmap.sh`. A model too
-  new for the map needs a temporary `input_/output_cost_per_token` pin in `config.yaml`.
-- **Wildcard caveat:** an `openrouter/*` model with no map entry may under-meter on *streaming*
-  requests. The OpenRouter key's own credit limit is the backstop. See `RUNBOOK.md` for detail.
+  new for the map needs a temporary price pin in `config.yaml` — including
+  `cache_read_input_token_cost`, or cached tokens get metered at the full input price.
+- **Wildcard caveat:** an `openrouter/*` model with no map entry meters **$0** on *streaming*
+  requests (pins can't cover a wildcard). The OpenRouter key's own credit limit is the backstop.
+  See `RUNBOOK.md` § "Pricing model" for the full accuracy story and upgrade path.
 
 ---
 
