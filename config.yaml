@@ -102,6 +102,24 @@ model_list:
     litellm_params:
       model: openrouter/deepseek/deepseek-r1
       api_key: os.environ/OPENROUTER_API_KEY
+  # Missing from the price map — pinned so streamed calls don't meter $0
+  # (openrouter.ai list prices, 2026-07-24: $0.435 / 1M in, $0.87 / 1M out).
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v4-pro
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.000000435
+      output_cost_per_token: 0.00000087
+      cache_read_input_token_cost: 0.000000003625
+  # Missing from the price map — pinned so streamed calls don't meter $0
+  # (openrouter.ai list prices, 2026-07-24: $0.30 / 1M in, $1.20 / 1M out).
+  - model_name: minimax-m3
+    litellm_params:
+      model: openrouter/minimax/minimax-m3
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0.0000003
+      output_cost_per_token: 0.0000012
+      cache_read_input_token_cost: 0.00000006
   # Missing from the price map — pinned so streamed calls don't meter $0.
   - model_name: llama-4-maverick
     litellm_params:

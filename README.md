@@ -52,10 +52,39 @@ Send one of these as the `"model"` field:
 | `gemini-flash` | Google Gemini 3.5 Flash |
 | `deepseek` | DeepSeek V3.2 |
 | `deepseek-r1` | DeepSeek R1 (reasoning) |
+| `deepseek-v4-pro` | DeepSeek V4 Pro |
+| `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
 
-**Any other OpenRouter model** works via its full ID, e.g. `"model": "openrouter/qwen/qwen3-max"`
-(browse the catalog at <https://openrouter.ai/models>).
+An alias and a full model ID are used exactly the same way — they're just the string you put in
+the `"model"` field of the request (see the code and curl examples below).
+
+#### Using models beyond the menu
+
+The proxy passes through the **entire OpenRouter catalog** (~400+ models) — you don't need to wait
+for a config change. Take the model's ID from <https://openrouter.ai/models> and prefix it with
+`openrouter/`:
+
+```jsonc
+"model": "openrouter/qwen/qwen3-max"            // any catalog model works immediately
+"model": "openrouter/deepseek/deepseek-v4-pro"  // full-ID form of the deepseek-v4-pro alias
+```
+
+Notes:
+
+- `GET /v1/models` (with your key) lists the curated aliases from the table above. Wildcard
+  models don't appear there but still work.
+- **Kimi models are the exception:** the `kimi-*` aliases go directly to Moonshot, not OpenRouter,
+  so only the ones in the table are available.
+- If a model is rejected with a permissions error, your key may be scoped to specific models —
+  ask the admin to widen it.
+- Spend tracking on wildcard models is best-effort: a model too new for LiteLLM's pricing map can
+  record **$0 for streamed calls** until the map catches up, so your usage dashboard may
+  under-report. Budgets still apply to whatever is recorded.
+
+**Using a model regularly?** Ask the admin (or open a PR) to add it as a named alias in
+`config.yaml` — that gives it a short name, puts it in the menu above, and pins its price so
+spend tracking stays accurate. That's how `deepseek-v4-pro` and `minimax-m3` were added.
 
 ### From code (OpenAI SDK)
 
