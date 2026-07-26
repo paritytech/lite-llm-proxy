@@ -190,7 +190,8 @@ rm /tmp/ct.txt
 - **OpenRouter** returns the real per-call cost; LiteLLM records that directly — **non-streaming
   only**. Our pinned LiteLLM (≤ v1.93) drops the inline cost on **streaming** responses
   (BerriAI/litellm#16021) and falls back to its price map. Curated aliases missing from the map
-  (`claude-opus`, `gpt-5`, `gpt-5-mini`, `gemini-flash`, `llama-4-maverick` as of 2026-07-23)
+  (`claude-opus`, `gpt-5`, `gpt-5-mini`, `gemini-flash`, `llama-4-maverick`, `deepseek-v4-pro`,
+  `minimax-m3` as of 2026-07-24)
   metered **$0 on streamed calls** until they were pinned in `config.yaml` at OpenRouter list
   prices. The upstream fix (PR #32255) is in v1.94.0-rc only — once a stable ≥ v1.94.0 is pinned
   in `docker-compose.yml`, remove those pins so the real per-call cost wins again.
