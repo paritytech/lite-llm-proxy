@@ -6,7 +6,7 @@ per-user access to a shared **Kimi (Moonshot AI)** API subscription, fronted by 
 Status: **shipped & live** at `https://llm.substrate.dev` (Caddy + LiteLLM + Postgres on the
 baremetal box). It now also fronts **OpenRouter** models alongside Kimi, and logs full
 request/response bodies as a training corpus (see
-`docs/superpowers/specs/2026-07-22-request-logging-design.md`). This document captures
+`docs/specs/2026-07-22-request-logging-design.md`). This document captures
 the original design; `README.md` and `RUNBOOK.md` are the current, authoritative references.
 
 ---

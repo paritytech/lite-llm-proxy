@@ -191,10 +191,13 @@ rm /tmp/ct.txt
   fetched from GitHub at startup and refreshed daily by the reload cron. A model too new for the
   map (e.g. `kimi-k2.7-code` at launch) needs an explicit `input_/output_cost_per_token` pin in
   `config.yaml` until the map catches up — then the pin can be removed.
-- **Wildcard caveat:** a model reached via `openrouter/*` that LiteLLM has no price for may
-  under-meter on *streaming* requests (OpenRouter's inline cost is dropped when streaming, and
-  there's no map entry to fall back to). The OpenRouter key's own **credit limit is the backstop**
-  for this. Curated aliases and all non-streaming calls are unaffected.
+- **Wildcard caveat — fixed at v1.94.0, verify on deploy:** a model reached via `openrouter/*`
+  with no map entry used to under-meter on *streaming* requests (OpenRouter's inline cost was
+  dropped when streaming). Our pinned image (≥ v1.95.0) includes the upstream fix (litellm
+  PR #32255: provider-reported usage cost is now used for OpenRouter streams). On the next
+  deploy, spot-check: stream one wildcard-model request, then confirm nonzero `spend` on its
+  spend-log row. Until that check passes, treat the OpenRouter key's own **credit limit as the
+  backstop** (it remains sensible defense-in-depth regardless).
 
 ## To change models / prices later
 
@@ -233,11 +236,18 @@ curl -sS https://<assigned-host>.substrate.dev/health/liveliness
 
 Captures every request/response body to Postgres (browsable in `/ui` Logs, auto-pruned after
 90 days by LiteLLM) and exports each day to gzipped JSONL under `LOG_EXPORT_DIR` (kept forever
-by default — the training corpus). Full design in `README.md` § "Request logging & training
-corpus".
+by default — the training corpus). The export **de-identifies**: identity columns are
+whitelisted out and prompt/response text is PII-scrubbed via the on-box Presidio pair (compose
+`scrub` profile). Full design in `README.md` § "Request logging & training corpus".
 
 > **Before enabling:** announce to the team that prompts/responses will be logged for model
-> training, and point them at README § "Logging & privacy" (includes the per-request opt-out).
+> training, and point them at README § "Logging & privacy" (includes the per-request opt-out
+> and the honest pseudonymized-not-anonymous caveat).
+
+> **Retention review (yearly):** the corpus is kept indefinitely on purpose (no training
+> pipeline exists yet — data accumulates until one does). Each July, re-confirm that stance:
+> is the corpus still needed, has a training run consumed it, can old days be pruned via
+> `LOG_EXPORT_RETENTION_DAYS`? Next review: **2027-07**.
 
 ```bash
 # 1. [laptop] Ship the updated config + script to the box (same as B1):
@@ -245,17 +255,31 @@ rsync -av --exclude=.env --exclude=.git --exclude=backups --exclude=logs \
   <local-repo>/ <box>:/opt/team-llm/
 ```
 ```bash
+# 1b. Pre-pull the images the export needs, and confirm python3 exists (scrub-logs.py is
+#     stdlib-only; Ubuntu ships python3). The Presidio pair is behind the `scrub` profile,
+#     so a plain `docker compose up -d` never starts it — the export script does, for the
+#     few minutes it runs (the analyzer holds ~1.5 GB RAM while up).
+cd /opt/team-llm
+docker compose --profile scrub pull presidio-analyzer presidio-anonymizer
+python3 --version
+```
+```bash
 # 2. Add the new .env values (UI login + export config). Password is hidden while pasting:
 cd /opt/team-llm
 printf 'Choose a UI admin password then Enter: '
 read -r -s UIPW
-printf 'UI_USERNAME=admin\nUI_PASSWORD=%s\nLOG_EXPORT_DIR=/opt/team-llm/logs\nLOG_EXPORT_RETENTION_DAYS=\n' "$UIPW" >> .env
+printf 'UI_USERNAME=admin\nUI_PASSWORD=%s\nLOG_EXPORT_DIR=/opt/team-llm/logs\nLOG_EXPORT_RETENTION_DAYS=\nLOG_EXPORT_SESSION_SALT=%s\n' "$UIPW" "$(openssl rand -hex 32)" >> .env
 unset UIPW
 grep -E '^(UI_USERNAME|LOG_EXPORT)' .env
+# The salt drives the corpus session pseudonym — generated once here, NEVER rotate it
+# (rotation unlinks sessions across the rotation date; see .env.example).
 ```
 ```bash
-# 3. Apply (recreates only litellm; Postgres data + keys untouched):
+# 3. Apply (recreates only litellm; Postgres data + keys untouched). This also picks up the
+#    pinned-image bump (v1.90.0 → v1.95.0; SpendLogs schema-identical, prisma migrations run
+#    automatically at startup):
 cd /opt/team-llm
+docker compose pull litellm
 docker compose up -d --force-recreate litellm
 docker compose ps
 ```
@@ -267,7 +291,7 @@ docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTim
 #    Expect: newest row's messages column contains "log-capture-test".
 ```
 ```bash
-# 5. Verify the opt-out actually works on our pinned image (v1.90.0) before announcing it:
+# 5. Verify the opt-out actually works on our pinned image (v1.95.0) before announcing it:
 curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"no-log-test"}],"no-log":true}' > /dev/null
 docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTime\", left(coalesce(messages::text,'<empty>'), 60) AS messages FROM \"LiteLLM_SpendLogs\" ORDER BY \"startTime\" DESC LIMIT 1;"
 #    Expect: NO "no-log-test" in the messages column. If the text DOES appear, the pinned
@@ -275,12 +299,20 @@ docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTim
 #    README § "Logging & privacy" (or bump the pinned image) BEFORE announcing.
 ```
 ```bash
-# 6. Verify the export script, then install its cron (02:50 — after midnight UTC, before the
-#    03:30 costmap reload; exports *yesterday*, so today's test may legitimately say 0 rows —
-#    run it for today's date to see the rows from step 4/5):
+# 6. Verify the export script END TO END (starts the Presidio pair, scrubs, stops it), then
+#    install its cron (02:50 — after midnight UTC, before the 03:30 costmap reload; exports
+#    *yesterday*, so run it for today's date to see the rows from step 4/5).
+#    First run is slow: the analyzer loads its NLP model (~1 min).
 chmod +x /opt/team-llm/scripts/export-logs.sh
 /opt/team-llm/scripts/export-logs.sh "$(date -u +%F)"
+#    Expect on stderr: a "scrub summary: rows=N masked={...}" line (per-entity mask counts —
+#    watch this in the cron log; a sudden spike = detector false positives, investigate while
+#    re-export inside the 90d window is still possible).
 zcat /opt/team-llm/logs/spendlogs-$(date -u +%F).jsonl.gz | head -1
+#    De-identification check — expect the two OK lines:
+zcat /opt/team-llm/logs/spendlogs-$(date -u +%F).jsonl.gz | head -1 | python3 -c "import json,sys; row=json.load(sys.stdin); bad={'user','api_key','end_user','team_id','organization_id','session_id','requester_ip_address','request_tags','metadata','proxy_server_request','api_base','cache_key','agent_id','startTime','endTime'} & row.keys(); missing={'session','turn'} - row.keys(); print(f'BAD identity columns: {bad}' if bad else f'MISSING session grouping: {missing}' if missing else 'OK: no identity columns; session+turn present')"
+zcat /opt/team-llm/logs/spendlogs-$(date -u +%F).jsonl.gz | grep -F '@parity.io' || echo "OK: no emails in text"
+docker compose ps   # presidio containers must NOT be listed (the script stops them)
 crontab -l 2>/dev/null > /tmp/ct.txt || true
 echo '50 2 * * * /opt/team-llm/scripts/export-logs.sh >> /opt/team-llm/logs/export.log 2>&1' >> /tmp/ct.txt
 crontab /tmp/ct.txt
@@ -308,6 +340,10 @@ docker system df
   Plain `docker compose down` is safe.
 - The nightly `backup.sh` pg_dump includes the last 90 days of spend logs as a side effect;
   the JSONL corpus is the long-term record.
+- **Triage export errors within 90 days.** The scrub is fail-closed: any error (Presidio
+  down, oversized row timing out the analyzer) means that day exports NO file until re-run.
+  A day that never exports successfully ages out of Postgres after 90 days and is then
+  unrecoverable — check `logs/export.log` when in doubt, re-run `export-logs.sh <date>`.
 - **Retention knobs:** Postgres = `maximum_spend_logs_retention_period` in `config.yaml`
   (redeploy litellm to apply); corpus = `LOG_EXPORT_RETENTION_DAYS` in `.env` (empty = forever).
   At heavy usage (~3 GB/day raw) drop Postgres to `30d` — see README sizing table.

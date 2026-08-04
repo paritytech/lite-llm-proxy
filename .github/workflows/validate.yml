@@ -31,10 +31,13 @@ jobs:
       - name: shellcheck scripts
         run: shellcheck scripts/*.sh
 
+      - name: python scripts compile
+        run: python3 -m py_compile scripts/*.py
+
       - name: SPDX header present on code/config files
         run: |
           missing=0
-          for f in $(git ls-files '*.sh' '*.yml' '*.yaml' 'Caddyfile'); do
+          for f in $(git ls-files '*.sh' '*.py' '*.yml' '*.yaml' 'Caddyfile'); do
             head -3 "$f" | grep -q 'SPDX-License-Identifier: Apache-2.0' \
               || { echo "missing SPDX header: $f"; missing=1; }
           done

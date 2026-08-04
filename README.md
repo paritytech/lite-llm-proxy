@@ -56,7 +56,11 @@ Send one of these as the `"model"` field:
 | `llama-4-maverick` | Meta Llama 4 Maverick |
 
 **Any other OpenRouter model** works via its full ID, e.g. `"model": "openrouter/qwen/qwen3-max"`
-(browse the catalog at <https://openrouter.ai/models>).
+(browse the catalog at <https://openrouter.ai/models>). **No enablement needed** — a model is
+usable the moment OpenRouter lists it, and spend is metered from OpenRouter's real per-call
+cost automatically. The aliases above are just short names for the common picks; ask the admin
+for a new alias only if you want one. (If your key was minted restricted to specific models,
+the wildcard won't apply to it — ask the admin.)
 
 ### From code (OpenAI SDK)
 
@@ -93,11 +97,25 @@ requests are rejected until the 30-day window resets. Ask the admin to raise it 
 which we use to build a training corpus for internal AI models. Concretely:
 
 - Recent requests (≤90 days) are browsable by admins in the proxy UI (per-request drill-down).
+  These rows are attributed (your email / key alias) so admins can debug and handle
+  erasure requests — and they are auto-deleted after 90 days.
 - A nightly job exports the day's requests to a compressed archive kept indefinitely on the
-  server, as training data.
+  server, as training data. **The archive is de-identified before it's written:** your email,
+  key alias, key hash, and IP are never exported (timestamps are reduced to the day),
+  prompt/response text is scrubbed — emails, names, phone numbers, and credential-shaped
+  strings are replaced with `<PLACEHOLDER>` tokens — and any images, audio, or files in
+  requests or responses are dropped from the archive entirely. Conversations keep their shape: the turns
+  of one session stay grouped and ordered under a random-looking session code (a salted
+  hash — your raw session id is never exported, and nothing links two of your sessions to
+  each other or to you).
 
-**Don't paste secrets into prompts** (they'd be captured like everything else — this is a good
-rule with any LLM provider, ours included).
+**Honesty note:** de-identification is pseudonymization, not anonymity. Free text can still
+identify you to a colleague ("my PR on the XCM refactor…" narrows it down fast in a team this
+size). Write prompts accordingly, or use the opt-out below.
+
+**Don't paste secrets into prompts.** The scrubber catches common key formats as a backstop,
+but it is a backstop — secrets would still sit in the 90-day hot store, and no detector is
+perfect. (This is a good rule with any LLM provider, ours included.)
 
 **Opting out per request:** send `"no-log": true` in the request body and that request's message
 content is excluded from logging. With the OpenAI SDK:
@@ -113,14 +131,31 @@ resp = client.chat.completions.create(
 Spend/budget accounting still happens for opted-out requests — only the message content is
 excluded. If you want an always-opt-out key instead of per-request flags, ask the admin.
 
+**Grouping your session (optional, helps the corpus):** requests carry no session identity by
+default — each one becomes a standalone entry. If you pass a `litellm_session_id` (any opaque
+string, same value for every turn of one conversation), the archive keeps those turns grouped
+and ordered, which makes much better training data:
+
+```python
+resp = client.chat.completions.create(
+    model="claude-sonnet",
+    messages=[...],
+    extra_body={"litellm_session_id": my_conversation_uuid},
+)
+```
+
+Use a random UUID per conversation — don't put your name or ticket ids in it (the raw value
+stays in the 90-day admin store; only a salted hash of it reaches the archive).
+
 ---
 
 ## For operators
 
 ### Architecture
 
-One `docker compose` stack. Three containers on a private Docker network; only Caddy publishes
-host ports.
+One `docker compose` stack. Three always-on containers on a private Docker network; only Caddy
+publishes host ports. (Two more — the Presidio PII-scrub pair — sit behind the `scrub` compose
+profile, started by the nightly export for a few minutes and bound to localhost only.)
 
 ```
 internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
@@ -143,7 +178,8 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
 | `.env.example` | Template for the real `.env` (secrets) that lives only on the host. |
 | `scripts/backup.sh` | Nightly `pg_dump` of the LiteLLM database, verified and pruned. |
 | `scripts/reload-costmap.sh` | Refresh LiteLLM's price map from upstream (no restart). |
-| `scripts/export-logs.sh` | Nightly export of request logs (incl. prompts) to gzipped JSONL — the training corpus. |
+| `scripts/export-logs.sh` | Nightly export of request logs (incl. prompts) to gzipped JSONL — the training corpus. De-identifies on the way out: identity-column whitelist + PII scrub. |
+| `scripts/scrub-logs.py` | JSONL filter used by the export: replaces PII/credentials in prompt/response text with placeholders via the local Presidio containers. Fail-closed. |
 | `.github/workflows/validate.yml` | CI: YAML parses, shellcheck, SPDX headers, no secrets committed. |
 | `RUNBOOK.md` | Step-by-step provisioning, deploy, key lifecycle, and DNS cutover. |
 | `SPEC.md` | The original design and rationale (background reference). |
@@ -179,20 +215,37 @@ Full request/response bodies are captured to build a training corpus (teammate-f
 and the opt-out are in [Logging & privacy](#logging--privacy) above). The data flow:
 
 ```
-request ──> litellm ──> Postgres LiteLLM_SpendLogs        (hot store, auto-pruned after 90d,
-                              │                            browsable in /ui Logs)
-                              └─ nightly export-logs.sh ─> $LOG_EXPORT_DIR/spendlogs-<date>.jsonl.gz
-                                                           (durable corpus, kept forever by default)
+request ──> litellm ──> Postgres LiteLLM_SpendLogs   (hot store: ATTRIBUTED rows, auto-pruned
+                              │                       after 90d, browsable in /ui Logs)
+                              └─ nightly export-logs.sh
+                                   ├─ column whitelist  (drops email/key/team/IP ids;
+                                   │                     timestamps coarsened to the day;
+                                   │                     session id → salted hash + turn no.)
+                                   ├─ scrub-logs.py     (PII/credentials in prompt+response text
+                                   │                     → <PLACEHOLDER>, via local Presidio)
+                                   └──> $LOG_EXPORT_DIR/spendlogs-<date>.jsonl.gz
+                                        (durable corpus: DE-IDENTIFIED, kept forever by default)
 ```
 
 - **Capture** is `store_prompts_in_spend_logs: true` in `config.yaml`.
 - **Postgres retention** is `maximum_spend_logs_retention_period: "90d"` in `config.yaml` —
   LiteLLM auto-deletes older rows daily, bounding DB growth. Pruning loses nothing: the export
-  runs nightly, long before rows age out.
-- **The corpus** is one gzipped JSONL file per UTC day (whole SpendLogs rows, schema-agnostic),
-  written by `scripts/export-logs.sh` (cron). Location `LOG_EXPORT_DIR` and optional pruning
-  `LOG_EXPORT_RETENTION_DAYS` are set in the host `.env` — retarget to a mounted datastore by
-  changing one line.
+  runs nightly, long before rows age out. The 90-day attributed hot store is also the safety
+  window: if the scrubber ever misbehaves, fix it and re-run `export-logs.sh <date>` for any
+  day still inside the window.
+- **De-identification happens at export time**, the last point before data becomes permanent.
+  The export SELECT is an explicit column *whitelist* (a new LiteLLM column stays out of the
+  corpus until consciously added); text scrubbing runs against the Presidio pair in the `scrub`
+  compose profile, on-box only, and **fails closed** — a scrub error aborts the export rather
+  than writing raw text. Each run logs a `scrub summary:` line with per-entity mask counts to
+  the cron log; a sudden spike means detector false positives — investigate while re-export is
+  still possible. This yields a *pseudonymized* corpus, not an anonymous one (free text can
+  still identify authors in a small team) — README's teammate section says so explicitly.
+- **The corpus** is one gzipped JSONL file per UTC day, written by `scripts/export-logs.sh`
+  (cron). Location `LOG_EXPORT_DIR` and optional pruning `LOG_EXPORT_RETENTION_DAYS` are set in
+  the host `.env` — retarget to a mounted datastore by changing one line. Corpus retention is
+  indefinite by design (collecting until a training pipeline exists), with an annual review
+  date — see RUNBOOK § G.
 - **Durability:** the corpus is a plain host directory (outside Docker) and Postgres lives in the
   `postgres_data` named volume — both survive reboots, `docker compose up -d` redeploys, and
   image bumps. Never run `docker compose down -v` (`-v` deletes the volumes).
@@ -208,8 +261,10 @@ request ──> litellm ──> Postgres LiteLLM_SpendLogs        (hot store, au
 - **Kimi / Moonshot** does not return cost, so spend comes from LiteLLM's price map, which is
   fetched from upstream at startup and refreshed daily by `scripts/reload-costmap.sh`. A model too
   new for the map needs a temporary `input_/output_cost_per_token` pin in `config.yaml`.
-- **Wildcard caveat:** an `openrouter/*` model with no map entry may under-meter on *streaming*
-  requests. The OpenRouter key's own credit limit is the backstop. See `RUNBOOK.md` for detail.
+- **Wildcard caveat (fixed at pinned v1.95.0, pending on-box verification):** an `openrouter/*`
+  model with no map entry used to under-meter on *streaming* requests; upstream fixed this in
+  v1.94.0 (provider-reported stream cost). The OpenRouter key's own credit limit stays on as
+  the backstop. See `RUNBOOK.md` § "Pricing model" for the deploy-time spot-check.
 
 ---
 
