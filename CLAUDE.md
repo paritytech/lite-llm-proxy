@@ -34,6 +34,10 @@ test suite — it's config, scripts, and docs.
   that rationale.
 - When asked about LLM models, pricing, or limits, don't answer from memory — `config.yaml` and the
   `claude-api` skill are the sources of truth for this repo's model menu.
+- **"Enable model X"** is usually a no-op: the `openrouter/*` wildcard in `config.yaml` already
+  serves any OpenRouter model by full ID with live cost tracking (see AGENTS.md § Conventions).
+  Config edits are only needed for a curated alias, or for Kimi/Moonshot models (menu entry +
+  possible temporary price pin).
 - After changing deploy/ops behavior, update `RUNBOOK.md` (and `README.md` if it's user-facing).
 - There is no automated test or lint step. "Verification" here means: YAML still parses, the SPDX
   header is present, no secret leaked, and `RUNBOOK.md`/`README.md` still match reality.

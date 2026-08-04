@@ -19,7 +19,7 @@ services:
     networks: [internal]
 
   litellm:
-    image: ghcr.io/berriai/litellm-database:v1.90.0   # PINNED — latest stable confirmed 2026-06-29
+    image: ghcr.io/berriai/litellm-database:v1.95.0   # PINNED — latest stable confirmed 2026-08-04
     restart: unless-stopped
     env_file: [.env]
     volumes:
@@ -30,6 +30,28 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks: [internal]
+
+  # ---- PII scrub pair (used only by scripts/export-logs.sh) ----
+  # Behind the `scrub` compose profile so a plain `docker compose up -d` does
+  # NOT start them: the analyzer's NLP model holds ~1.5 GB RAM, so the nightly
+  # export brings them up for the few minutes it runs and stops them after.
+  # Ports bind to localhost only — the scrub script talks to them from the
+  # host; nothing else should be able to.
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer:2.2.364   # PINNED — latest confirmed 2026-07-27
+    profiles: [scrub]
+    restart: "no"
+    ports:
+      - "127.0.0.1:5002:3000"
+    networks: [internal]
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer:2.2.364   # PINNED — keep in lockstep with the analyzer
+    profiles: [scrub]
+    restart: "no"
+    ports:
+      - "127.0.0.1:5001:3000"
     networks: [internal]
 
   postgres:

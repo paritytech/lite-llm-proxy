@@ -42,6 +42,12 @@ changes accordingly.
 - **Models & pricing** live in `config.yaml`. Prefer letting OpenRouter's live cost and LiteLLM's
   auto-fetched price map drive spend; only hardcode `input_/output_cost_per_token` for a model too
   new for the map, and remove the pin once the map catches up.
+- **"Enable model X" requests are usually a no-op.** The `openrouter/*` wildcard in `config.yaml`
+  already serves every OpenRouter model by its full ID (`openrouter/<org>/<model>`), with spend
+  metered from OpenRouter's real per-call cost — no config change, no price pin, no deploy. Only
+  edit `config.yaml` if (a) the requester wants a short curated alias, or (b) it's a **Kimi/
+  Moonshot** model — those need a `model_list` entry and, if too new for LiteLLM's price map, a
+  temporary cost pin (Moonshot returns no per-call cost). Point teammates at README § "Models".
 
 ## Repository layout
 
@@ -53,6 +59,9 @@ changes accordingly.
 | `.env.example` | Secrets template. Real `.env` is host-only, git-ignored. |
 | `scripts/backup.sh` | Nightly verified `pg_dump`, pruned after 14 days. |
 | `scripts/reload-costmap.sh` | Refresh LiteLLM price map from upstream (no restart). |
+| `scripts/export-logs.sh` | Nightly de-identified JSONL export of request logs (training corpus). |
+| `scripts/scrub-logs.py` | PII/credential scrub filter used by the export (local Presidio). |
+| `docs/specs/` | Dated design/review docs (request logging, privacy data flow, security review). |
 | `RUNBOOK.md` | Authoritative step-by-step: provision → deploy → key lifecycle → DNS cutover. |
 | `SPEC.md` | Original design and rationale (background). |
 

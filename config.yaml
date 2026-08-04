@@ -43,16 +43,16 @@ model_list:
       cache_read_input_token_cost: 0.0000003
 
   # ---- OpenRouter (base openrouter.ai/api/v1) ----
-  # OpenRouter returns the actual per-call cost and LiteLLM records it directly — but only
-  # on NON-STREAMING calls: our pinned LiteLLM (bug fixed upstream only in v1.94.0-rc,
-  # BerriAI/litellm#16021 / PR #32255) drops the inline cost on STREAMING responses and
-  # falls back to its price map. Any model missing from the map therefore meters $0 when
-  # streamed — which is most agent/IDE traffic. Models the map covers (claude-sonnet,
-  # gemini-pro, deepseek, deepseek-r1) stay pin-free; the ones it doesn't carry get
-  # temporary pins below at OpenRouter list prices (openrouter.ai/api/v1/models,
-  # 2026-07-23). Drop the pins once we run a stable release >= v1.94.0 or the map
-  # catches up. The map itself is auto-fetched from GitHub at startup and refreshed by
-  # the nightly cron (POST /reload/model_cost_map).
+  # OpenRouter returns the actual per-call cost and LiteLLM records it directly. Pins
+  # <= v1.93 dropped that inline cost on STREAMING responses (BerriAI/litellm#16021)
+  # and fell back to the price map, so map-missing models metered $0 when streamed —
+  # hence the temporary alias pins below at OpenRouter list prices (2026-07-23/24).
+  # docker-compose.yml now pins v1.95.0, which contains the upstream fix (PR #32255,
+  # stable since v1.94.0): after deploying, run the streaming spot-check in RUNBOOK
+  # § "Pricing model", and once it passes REMOVE the alias pins below so the real
+  # per-call cost wins again. Models the map covers (claude-sonnet, gemini-pro,
+  # deepseek, deepseek-r1) are pin-free already. The map itself is auto-fetched from
+  # GitHub at startup and refreshed by the nightly cron (POST /reload/model_cost_map).
   - model_name: claude-sonnet
     litellm_params:
       model: openrouter/anthropic/claude-sonnet-4.6
@@ -140,6 +140,20 @@ general_settings:
   database_url: os.environ/DATABASE_URL
   # Models are defined here in config, not stored in the DB.
   store_model_in_db: false
+
+  # ---- Request logging (training corpus) ----
+  # Store full prompts + responses in the LiteLLM_SpendLogs table (Postgres), viewable
+  # per-request in the /ui Logs page. Purpose: build a corpus for model training.
+  # Teammates are informed (README "Logging & privacy") and can opt out per request by
+  # sending "no-log": true in the body.
+  store_prompts_in_spend_logs: true
+  # Auto-delete spend-log rows older than 90 days, checked once a day. This bounds
+  # Postgres growth only — nothing is lost: the durable corpus is the nightly JSONL
+  # export (scripts/export-logs.sh), which runs long before rows age out. To keep
+  # more/less in the hot store (UI browsing window), edit the period here and
+  # force-recreate litellm.
+  maximum_spend_logs_retention_period: "90d"
+  maximum_spend_logs_retention_interval: "1d"
 
 litellm_settings:
   # Silently drop unsupported OpenAI params instead of erroring (eases tool compatibility).
