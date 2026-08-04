@@ -45,6 +45,7 @@ Send one of these as the `"model"` field:
 | `kimi-k2` | Kimi K2.6 (general default) |
 | `kimi-k2.5` | Kimi K2.5 (cheaper) |
 | `kimi-k2.7-code` | Kimi K2.7 Code (strongest coding) |
+| `kimi-k3` | Kimi K3 (flagship reasoning, 1M context, vision) |
 | `claude-sonnet` | Anthropic Claude Sonnet 4.6 |
 | `claude-opus` | Anthropic Claude Opus 4.8 |
 | `gpt-5` | OpenAI GPT-5.5 |
@@ -53,14 +54,40 @@ Send one of these as the `"model"` field:
 | `gemini-flash` | Google Gemini 3.5 Flash |
 | `deepseek` | DeepSeek V3.2 |
 | `deepseek-r1` | DeepSeek R1 (reasoning) |
+| `deepseek-v4-pro` | DeepSeek V4 Pro |
+| `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
 
-**Any other OpenRouter model** works via its full ID, e.g. `"model": "openrouter/qwen/qwen3-max"`
-(browse the catalog at <https://openrouter.ai/models>). **No enablement needed** — a model is
-usable the moment OpenRouter lists it, and spend is metered from OpenRouter's real per-call
-cost automatically. The aliases above are just short names for the common picks; ask the admin
-for a new alias only if you want one. (If your key was minted restricted to specific models,
-the wildcard won't apply to it — ask the admin.)
+An alias and a full model ID are used exactly the same way — they're just the string you put in
+the `"model"` field of the request (see the code and curl examples below).
+
+#### Using models beyond the menu
+
+The proxy passes through the **entire OpenRouter catalog** (~400+ models) — you don't need to wait
+for a config change. Take the model's ID from <https://openrouter.ai/models> and prefix it with
+`openrouter/`:
+
+```jsonc
+"model": "openrouter/qwen/qwen3-max"            // any catalog model works immediately
+"model": "openrouter/deepseek/deepseek-v4-pro"  // full-ID form of the deepseek-v4-pro alias
+```
+
+Notes:
+
+- `GET /v1/models` (with your key) lists the curated aliases from the table above. Wildcard
+  models don't appear there but still work.
+- **Kimi models are the exception:** the `kimi-*` aliases go directly to Moonshot, not OpenRouter,
+  so only the ones in the table are available.
+- If a model is rejected with a permissions error, your key may be scoped to specific models —
+  ask the admin to widen it.
+- Spend tracking on wildcard models uses OpenRouter's real per-call cost. As of the pinned
+  LiteLLM (≥ v1.94.0) that includes **streamed** calls too; until the deploy-time spot-check
+  confirms it on our box (RUNBOOK § "Pricing model"), treat streamed wildcard spend as
+  best-effort. Budgets still apply to whatever is recorded.
+
+**Using a model regularly?** Ask the admin (or open a PR) to add it as a named alias in
+`config.yaml` — that gives it a short name and puts it in the menu above. That's how
+`deepseek-v4-pro` and `minimax-m3` were added.
 
 ### From code (OpenAI SDK)
 
@@ -257,14 +284,20 @@ request ──> litellm ──> Postgres LiteLLM_SpendLogs   (hot store: ATTRIBU
 
 ### How pricing stays accurate
 
-- **OpenRouter** returns the real per-call cost; LiteLLM records it directly — no hardcoded prices.
+- **OpenRouter** returns the real per-call cost; LiteLLM records it directly. Our previous pin
+  (v1.90.0) dropped that inline cost on **streaming** calls
+  ([BerriAI/litellm#16021](https://github.com/BerriAI/litellm/issues/16021)); the current pin
+  (v1.95.0) includes the upstream fix (PR #32255). The temporary price pins on curated aliases
+  from that era stay in `config.yaml` until the deploy-time streaming spot-check passes
+  (`RUNBOOK.md` § "Pricing model") — then they come off so the real cost wins again.
 - **Kimi / Moonshot** does not return cost, so spend comes from LiteLLM's price map, which is
   fetched from upstream at startup and refreshed daily by `scripts/reload-costmap.sh`. A model too
-  new for the map needs a temporary `input_/output_cost_per_token` pin in `config.yaml`.
+  new for the map needs a temporary price pin in `config.yaml` — including
+  `cache_read_input_token_cost`, or cached tokens get metered at the full input price.
 - **Wildcard caveat (fixed at pinned v1.95.0, pending on-box verification):** an `openrouter/*`
-  model with no map entry used to under-meter on *streaming* requests; upstream fixed this in
-  v1.94.0 (provider-reported stream cost). The OpenRouter key's own credit limit stays on as
-  the backstop. See `RUNBOOK.md` § "Pricing model" for the deploy-time spot-check.
+  model with no map entry used to meter **$0** on *streaming* requests (a wildcard can't carry a
+  pin). Upstream fixed this in v1.94.0 (provider-reported stream cost). The OpenRouter key's own
+  credit limit stays on as the backstop. See `RUNBOOK.md` § "Pricing model" for the spot-check.
 
 ---
 
