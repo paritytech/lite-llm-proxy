@@ -207,7 +207,10 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
 | `scripts/reload-costmap.sh` | Refresh LiteLLM's price map from upstream (no restart). |
 | `scripts/export-logs.sh` | Nightly export of request logs (incl. prompts) to gzipped JSONL — the training corpus. De-identifies on the way out: identity-column whitelist + PII scrub. |
 | `scripts/scrub-logs.py` | JSONL filter used by the export: replaces PII/credentials in prompt/response text with placeholders via the local Presidio containers. Fail-closed. |
+| `scripts/deploy.sh` | Change-aware deploy step CI runs on the box — restarts only what the merge touched. |
+| `scripts/deploy-gatekeeper.sh` | SSH forced command pinning the CI deploy key to rsync + deploy only. |
 | `.github/workflows/validate.yml` | CI: YAML parses, shellcheck, SPDX headers, no secrets committed. |
+| `.github/workflows/deploy.yml` | Auto-deploys every merge to `main` to the box (manual trigger available). |
 | `RUNBOOK.md` | Step-by-step provisioning, deploy, key lifecycle, and DNS cutover. |
 | `SPEC.md` | The original design and rationale (background reference). |
 
@@ -220,8 +223,12 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
 3. `docker compose up -d` brings up Caddy (which auto-issues the Let's Encrypt cert), LiteLLM, and Postgres.
 4. Nightly crons run the backup and price-map refresh.
 
-To change models or settings: edit `config.yaml`, commit, rsync to the host, then
-`docker compose up -d --force-recreate litellm`.
+**Merging a PR to `main` deploys it.** GitHub Actions (`deploy.yml`) rsyncs the repo to the box
+and restarts only what the change touched — a `config.yaml` merge recreates LiteLLM, a
+`Caddyfile` merge reloads Caddy gracefully, a docs-only merge restarts nothing. Re-deploys can
+be triggered manually from the Actions tab. Setup and security model: `RUNBOOK.md` § H.
+
+To change models or settings: edit `config.yaml`, open a PR, merge — CI does the rest.
 
 ### Admin tasks
 

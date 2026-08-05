@@ -1,0 +1,82 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Auto-deploy to the production box. Every push to main (i.e. every merged PR) rsyncs the
+# repo to /opt/team-llm on the box and runs scripts/deploy.sh there, which restarts only
+# what the change actually touched (see that script for the change→action table).
+# workflow_dispatch adds a manual "Run workflow" button for re-deploys.
+#
+# Server-side setup (deploy user, forced-command gatekeeper, GitHub secrets) is a one-time
+# manual step — RUNBOOK.md § H. The SSH key in DEPLOY_SSH_KEY can only rsync into
+# /opt/team-llm and run the deploy script; it has no general shell (see
+# scripts/deploy-gatekeeper.sh).
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Deploys queue rather than overlap; never cancel one mid-flight — a half-applied
+# rsync + restart is worse than a stale one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  # Same checks as PR CI — a manual dispatch or a direct push to main must not skip them.
+  validate:
+    uses: ./.github/workflows/validate.yml
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://llm.substrate.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      # Key and pinned host key come from Actions secrets; StrictHostKeyChecking stays on
+      # (yes by default) because known_hosts is pre-seeded — no TOFU on a CI runner.
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      # The box side is rrsync rooted at /opt/team-llm, hence the bare "/" destination.
+      # Excludes protect everything that lives only on the box: secrets (.env), the
+      # training corpus (logs/), DB dumps (backups/), and deploy.sh's state file.
+      # --delete keeps the box tree an exact mirror of the repo, and rsync's --delete
+      # never removes excluded paths (that would take --delete-excluded, which we never use).
+      - name: Rsync repo to the box
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          rsync -az --delete \
+            --exclude=.env \
+            --exclude=.git \
+            --exclude=.deploy-state \
+            --exclude=backups \
+            --exclude=logs \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST":/
+
+      # "deploy" is the one non-rsync command the gatekeeper accepts; it runs
+      # /opt/team-llm/scripts/deploy.sh, whose exit code (incl. its on-box health check)
+      # decides this step's pass/fail.
+      - name: Run deploy script on the box
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: ssh "$DEPLOY_USER@$DEPLOY_HOST" deploy
+
+      # Outside-in check from the runner: proves DNS + TLS + Caddy + LiteLLM end to end,
+      # not just the on-box loopback path.
+      - name: Health check from outside
+        run: curl -fsS --retry 5 --retry-delay 5 --retry-all-errors https://llm.substrate.dev/health/liveliness

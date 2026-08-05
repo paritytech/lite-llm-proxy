@@ -61,17 +61,27 @@ changes accordingly.
 | `scripts/reload-costmap.sh` | Refresh LiteLLM price map from upstream (no restart). |
 | `scripts/export-logs.sh` | Nightly de-identified JSONL export of request logs (training corpus). |
 | `scripts/scrub-logs.py` | PII/credential scrub filter used by the export (local Presidio). |
+| `scripts/deploy.sh` | Change-aware deploy step CI runs on the box (restarts only what changed). |
+| `scripts/deploy-gatekeeper.sh` | Forced command pinning the CI SSH key to rsync + deploy only. |
+| `.github/workflows/validate.yml` | CI checks: YAML parses, shellcheck, SPDX, no secrets. |
+| `.github/workflows/deploy.yml` | Auto-deploy on merge to `main` (+ manual dispatch). |
 | `docs/specs/` | Dated design/review docs (request logging, privacy data flow, security review). |
 | `RUNBOOK.md` | Authoritative step-by-step: provision → deploy → key lifecycle → DNS cutover. |
 | `SPEC.md` | Original design and rationale (background). |
 
 ## Deploy model (so you don't suggest the wrong thing)
 
-- The host runs the stack from `/opt/team-llm`. The repo is **rsync'd** there, excluding `.env`,
-  `.git`, and `backups/`. There is no CI/CD pipeline — deploys are manual via the runbook.
+- The host runs the stack from `/opt/team-llm`. **Merging a PR to `main` deploys it**:
+  `.github/workflows/deploy.yml` rsyncs the repo there (excluding `.env`, `.git`, `backups/`,
+  `logs/`, `.deploy-state`) as a locked-down `deploy` user and runs `scripts/deploy.sh`, which
+  restarts only what the change touched (config.yaml → force-recreate litellm; Caddyfile →
+  graceful reload; docs/scripts → no restart). Setup and details: `RUNBOOK.md` § H.
+- Therefore: **a merged PR is a production deploy.** Config edits land on the live service
+  minutes after merge — there is no separate "apply" step to gate them.
+- Manual/break-glass paths still exist (`workflow_dispatch` re-deploy; on-box edits as the
+  deploy user) — see `RUNBOOK.md` § H. The original laptop-rsync flow remains only for
+  provisioning a new box (§ A–B).
 - `RUNBOOK.md` marks each step as run on the **box** or on the **[laptop]**. Respect that split.
-- To apply a config change: edit here → commit → rsync to the host →
-  `cd /opt/team-llm && docker compose up -d --force-recreate litellm`.
 
 ## Making changes — checklist
 
