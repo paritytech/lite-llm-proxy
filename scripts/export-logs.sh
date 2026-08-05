@@ -109,7 +109,16 @@ done
 # non-empty id — this guards upstream drift.)
 # LiteLLM stores startTime naive-UTC, so the day window and the "day" cast use
 # naive timestamps directly — no dependence on the Postgres session TimeZone.
-SQL="COPY (SELECT row_to_json(t) FROM (
+# Emitted as a plain SELECT in tuples-only unaligned mode (-tA below), NOT
+# COPY ... TO STDOUT: COPY's text format escapes backslashes in its output,
+# which corrupts the JSON the moment a prompt contains a double quote
+# (row_to_json's \" arrives as \\" — the scrubber then fail-closes on the
+# malformed line; hit on the first real-traffic export, 2026-08-05).
+# Unaligned SELECT output applies no escaping, and row_to_json already
+# escapes control characters, so each row is guaranteed one clean line.
+# FETCH_COUNT streams via a cursor instead of buffering the whole day in
+# psql's memory (matters at heavy usage — README's sizing table is ~GB/day).
+SQL="SELECT row_to_json(t) FROM (
   SELECT \"request_id\", \"call_type\", \"model\", \"model_group\",
          \"custom_llm_provider\", \"spend\", \"prompt_tokens\",
          \"completion_tokens\", \"total_tokens\", \"request_duration_ms\",
@@ -125,12 +134,12 @@ SQL="COPY (SELECT row_to_json(t) FROM (
   FROM \"LiteLLM_SpendLogs\"
   WHERE \"startTime\" >= '${DAY}'::timestamp
     AND \"startTime\" < '${DAY}'::timestamp + interval '1 day'
-  ORDER BY \"session\", \"turn\") t) TO STDOUT"
+  ORDER BY \"session\", \"turn\") t"
 
 # SQL goes in via stdin (-f -), NOT argv: the query embeds the session salt,
 # and argv is world-readable in `ps`/proc for the duration of the dump.
 printf '%s\n' "$SQL" \
-  | docker compose exec -T postgres psql -U litellm -d litellm -v ON_ERROR_STOP=1 -q -f - \
+  | docker compose exec -T postgres psql -U litellm -d litellm -tA -v ON_ERROR_STOP=1 -v FETCH_COUNT=500 -q -f - \
   | python3 /opt/team-llm/scripts/scrub-logs.py \
   | gzip > "$TMP"
 gzip -t "$TMP"
