@@ -304,18 +304,26 @@ docker compose ps
 ```
 ```bash
 # 4. Verify capture: send one request, then check the newest log row has the message body.
+#    KNOWN QUIRK on the pinned image (v1.95.0, BerriAI/litellm#23636): the prompt lands in
+#    proxy_server_request (alongside raw headers), NOT the messages column (stays '{}');
+#    response is stored correctly. The export script compensates (see the CASE in
+#    scripts/export-logs.sh) — after a future image bump, re-run this and if messages is
+#    populated again, remove that workaround.
 MASTER=$(grep '^LITELLM_MASTER_KEY=' /opt/team-llm/.env | cut -d= -f2)
 curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"log-capture-test"}]}' > /dev/null
-docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTime\", model, left(messages::text, 60) AS messages FROM \"LiteLLM_SpendLogs\" ORDER BY \"startTime\" DESC LIMIT 3;"
-#    Expect: newest row's messages column contains "log-capture-test".
+docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTime\", model, left(messages::text, 30) AS messages, left(proxy_server_request::text, 60) AS proxy_server_request FROM \"LiteLLM_SpendLogs\" ORDER BY \"startTime\" DESC LIMIT 3;"
+#    Expect: newest row contains "log-capture-test" in proxy_server_request (v1.95.0) or
+#    in messages (fixed versions). If it's in NEITHER, capture is broken — stop and debug.
 ```
 ```bash
 # 5. Verify the opt-out actually works on our pinned image (v1.95.0) before announcing it:
 curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"kimi-k2","messages":[{"role":"user","content":"no-log-test"}],"no-log":true}' > /dev/null
-docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTime\", left(coalesce(messages::text,'<empty>'), 60) AS messages FROM \"LiteLLM_SpendLogs\" ORDER BY \"startTime\" DESC LIMIT 1;"
-#    Expect: NO "no-log-test" in the messages column. If the text DOES appear, the pinned
-#    LiteLLM version doesn't honor no-log for spend logs — remove the opt-out promise from
-#    README § "Logging & privacy" (or bump the pinned image) BEFORE announcing.
+docker compose exec -T postgres psql -U litellm -d litellm -c "SELECT \"startTime\", left(coalesce(messages::text,'<empty>'), 30) AS messages, left(coalesce(proxy_server_request::text,'<empty>'), 60) AS proxy_server_request FROM \"LiteLLM_SpendLogs\" ORDER BY \"startTime\" DESC LIMIT 1;"
+#    Expect: NO "no-log-test" anywhere — on v1.95.0 the opt-out request writes no spend-log
+#    row at all (verified 2026-08-05), so the newest row is still the step-4 one. If the
+#    text DOES appear (messages OR proxy_server_request), the pinned LiteLLM version doesn't
+#    honor no-log for spend logs — remove the opt-out promise from README § "Logging &
+#    privacy" (or bump the pinned image) BEFORE announcing.
 ```
 ```bash
 # 6. Verify the export script END TO END (starts the Presidio pair, scrubs, stops it), then
@@ -341,7 +349,10 @@ rm /tmp/ct.txt
 ```bash
 # 7. Verify UI login with username/password (not the master key): open
 #    https://llm.substrate.dev/ui and log in as admin / <UI_PASSWORD>. The Logs page
-#    shows per-request drill-down incl. message bodies.
+#    shows per-request drill-down. On v1.95.0 the request side may show "Request/Response
+#    Data Not Available" (same #23636 quirk — the UI reads the messages column); the
+#    response side renders, and the raw request is in the row's proxy_server_request via
+#    psql if needed for debugging.
 ```
 ```bash
 # 8. Disk watch (any time): corpus + DB growth vs free space.

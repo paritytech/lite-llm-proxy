@@ -82,6 +82,14 @@ done
 # requester_ip_address, session_id, request_tags, proxy_server_request (raw
 # headers), cache_key, api_base, agent_id, and the fine-grained timestamps
 # (endTime/completionStartTime) — startTime is coarsened to the UTC day.
+# WORKAROUND (LiteLLM v1.95.0, BerriAI/litellm#23636): the pinned image writes
+# the request prompt into proxy_server_request instead of the messages column
+# (messages stays '{}'; response is unaffected). The CASE below cherry-picks
+# ONLY the ->'messages' key out of proxy_server_request when the messages
+# column is empty — the surrounding headers/metadata in that column still
+# never leave Postgres, and the extracted text goes through the same scrub.
+# Remove the CASE (back to a bare "messages") once an image bump stores
+# messages directly again — verify via RUNBOOK § G step 4.
 # Session structure IS exported (needed for training on whole conversations),
 # but pseudonymously: "session" = md5(secret salt || session_id) — raw ids are
 # client-chosen strings that can embed identity and appear in other systems'
@@ -110,7 +118,10 @@ SQL="COPY (SELECT row_to_json(t) FROM (
          md5('${SESSION_SALT}' || COALESCE(NULLIF(\"session_id\", ''), \"request_id\")) AS \"session\",
          row_number() OVER (PARTITION BY COALESCE(NULLIF(\"session_id\", ''), \"request_id\")
                             ORDER BY \"startTime\", \"request_id\") AS \"turn\",
-         \"messages\", \"response\"
+         CASE WHEN \"messages\" IS NULL OR \"messages\"::text IN ('{}', '[]', 'null')
+              THEN \"proxy_server_request\" -> 'messages'
+              ELSE \"messages\" END AS \"messages\",
+         \"response\"
   FROM \"LiteLLM_SpendLogs\"
   WHERE \"startTime\" >= '${DAY}'::timestamp
     AND \"startTime\" < '${DAY}'::timestamp + interval '1 day'
