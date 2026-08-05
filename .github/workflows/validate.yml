@@ -11,6 +11,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets deploy.yml run these same checks as its first job (needs: validate) so a manual
+  # dispatch or direct push can never deploy something that would fail PR CI.
+  workflow_call:
 
 jobs:
   validate:

@@ -219,8 +219,9 @@ rm /tmp/ct.txt
 
 ## To change models / prices later
 
-Edit `config.yaml` locally → commit → rsync to the box (step B1) →
-`cd /opt/team-llm && docker compose up -d --force-recreate litellm`.
+Edit `config.yaml` locally → PR → merge. CI deploys it (see § H): the merge rsyncs the repo to
+the box and force-recreates litellm automatically. Break-glass (GitHub down): edit on the box as
+the deploy user (`sudo -iu deploy`) → `cd /opt/team-llm && docker compose up -d --force-recreate litellm`.
 
 ---
 
@@ -365,3 +366,113 @@ docker system df
 - **Retention knobs:** Postgres = `maximum_spend_logs_retention_period` in `config.yaml`
   (redeploy litellm to apply); corpus = `LOG_EXPORT_RETENTION_DAYS` in `.env` (empty = forever).
   At heavy usage (~3 GB/day raw) drop Postgres to `30d` — see README sizing table.
+
+---
+
+## H. CI auto-deploy (GitHub Actions → box)
+
+Every PR merged to `main` deploys itself: `.github/workflows/deploy.yml` re-runs the validate
+checks, rsyncs the repo to `/opt/team-llm`, and runs `scripts/deploy.sh` on the box, which
+restarts **only what the change touched**:
+
+| Changed file | Action on the box |
+|---|---|
+| `docker-compose.yml` | `docker compose up -d` |
+| `config.yaml` | `docker compose up -d --force-recreate litellm` |
+| `Caddyfile` | graceful `caddy reload` (zero downtime) |
+| anything else (docs, scripts) | rsync only — **no restart** |
+
+Manual runs: **Actions → deploy → Run workflow** (or `gh workflow run deploy`). Deploys queue —
+two merges never interleave. A deploy is only green after the on-box health gate **and** an
+outside-in `curl /health/liveliness` from the runner both pass. Rollback = revert the PR (the
+revert deploys itself). Break-glass if GitHub is down: `sudo -iu deploy` on the box, edit
+files, `docker compose up -d --force-recreate litellm`.
+
+**What CI can never touch:** the rsync excludes `.env`, `logs/` (the training corpus —
+`spendlogs-YYYY-MM-DD.jsonl.gz`, kept forever), `backups/`, and `.deploy-state`; rsync's
+`--delete` never removes excluded paths, and `--delete-excluded` is never used. Postgres data
+and Caddy certs live in named Docker volumes, invisible to rsync entirely.
+
+**Security model:** the CI key is pinned in `authorized_keys` to a forced command
+(`/usr/local/bin/deploy-gatekeeper`, root-owned, outside the rsync'd tree) that allows exactly
+two operations — rsync confined to `/opt/team-llm` (via `rrsync`) and running
+`scripts/deploy.sh`. No shell, no pty, no forwarding. Eyes open: a leaked key can still upload
+files the deploy then executes (config, compose, scripts) — inherent to any push-based
+auto-deploy — so the private key exists **only** as an Actions secret of this private repo;
+keep no local copy.
+
+### H1. One-time setup
+
+```bash
+# 1. Create the deploy user (docker group => can run compose without sudo) and hand it the tree.
+sudo adduser --disabled-password --gecos 'CI deploy' deploy
+sudo usermod -aG docker deploy
+sudo chown -R deploy:deploy /opt/team-llm
+```
+```bash
+# 2. [laptop] Ship the current repo (brings scripts/deploy-gatekeeper.sh + scripts/deploy.sh):
+rsync -av --exclude=.env --exclude=.git --exclude=backups --exclude=logs \
+  <local-repo>/ <box>:/opt/team-llm/
+# If this rsync now fails with permission errors, your admin user lost write access in step 1
+# (expected) — re-run it as:  rsync ... --rsync-path='sudo -u deploy rsync' ...
+```
+```bash
+# 3. Install the gatekeeper OUTSIDE the tree (root-owned so the CI key can't rewrite it),
+#    and confirm rrsync is available (rsync ships it; path varies by release):
+sudo install -m 755 -o root -g root /opt/team-llm/scripts/deploy-gatekeeper.sh /usr/local/bin/deploy-gatekeeper
+command -v rrsync || ls /usr/share/rsync/scripts/rrsync
+#    If BOTH missing: sudo apt-get install -y rsync  (recent Ubuntu packages /usr/bin/rrsync)
+```
+```bash
+# 4. [laptop] Generate the CI keypair. NO passphrase (CI can't type one); never reused elsewhere.
+ssh-keygen -t ed25519 -f ./deploy_key -N '' -C 'gha-deploy lite-llm-proxy'
+cat deploy_key.pub    # -> paste into step 5
+```
+```bash
+# 5. Pin the pubkey to the gatekeeper. Paste the deploy_key.pub line where indicated:
+sudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+echo 'command="/usr/local/bin/deploy-gatekeeper",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty PASTE_DEPLOY_KEY_PUB_LINE_HERE' | sudo tee /home/deploy/.ssh/authorized_keys
+sudo chown deploy:deploy /home/deploy/.ssh/authorized_keys
+sudo chmod 600 /home/deploy/.ssh/authorized_keys
+```
+```bash
+# 6. [laptop] Prove the lockdown works BEFORE giving the key to GitHub:
+ssh -i deploy_key deploy@<box-host> echo pwned      # EXPECT: "refused: echo pwned", exit 255
+ssh -i deploy_key deploy@<box-host>                  # EXPECT: refused (no interactive shell)
+rsync -avn -e 'ssh -i deploy_key' --exclude=.env --exclude=.git <local-repo>/ deploy@<box-host>:/
+#    EXPECT: a dry-run file list (rrsync roots the path at /opt/team-llm, hence dest ":/").
+#    Do NOT run `ssh ... deploy` yet — that's a real deploy; let CI do it (step H2).
+```
+```bash
+# 7. [laptop] Load the GitHub Actions secrets, then destroy the local private key:
+gh secret set DEPLOY_SSH_KEY --repo paritytech/lite-llm-proxy < deploy_key
+gh secret set DEPLOY_HOST --repo paritytech/lite-llm-proxy --body '<box-host-or-ip>'
+gh secret set DEPLOY_USER --repo paritytech/lite-llm-proxy --body 'deploy'
+ssh-keyscan -t ed25519 <box-host> | gh secret set DEPLOY_KNOWN_HOSTS --repo paritytech/lite-llm-proxy
+rm -P deploy_key deploy_key.pub    # gone everywhere except GitHub's secret store
+```
+```bash
+# 8. Move the three nightly crons to the deploy user (they write into dirs deploy now owns):
+crontab -l | grep '/opt/team-llm/scripts/' | sudo crontab -u deploy -
+crontab -l | grep -v '/opt/team-llm/scripts/' | crontab -
+sudo crontab -l -u deploy    # EXPECT: backup 02:30, export-logs 02:50, reload-costmap 03:30
+crontab -l                   # EXPECT: no /opt/team-llm lines left
+```
+
+### H2. First deploy + verify
+
+```bash
+# [laptop] Trigger a deploy of current main and watch it:
+gh workflow run deploy --repo paritytech/lite-llm-proxy
+gh run watch --repo paritytech/lite-llm-proxy --exit-status
+```
+```bash
+# On the box afterwards: state file exists, corpus/backups untouched, stack healthy.
+ls -la /opt/team-llm/.deploy-state /opt/team-llm/logs /opt/team-llm/backups
+cd /opt/team-llm && docker compose ps
+curl -sS https://llm.substrate.dev/health/liveliness
+```
+
+From then on, merging a PR **is** the deploy. On-box manual edits should be rare and are made
+as the deploy user (`sudo -iu deploy`) — the next CI rsync (`--delete`) overwrites any drift
+from the repo, except inside the excluded paths listed above.
