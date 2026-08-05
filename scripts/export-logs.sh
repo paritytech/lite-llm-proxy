@@ -59,18 +59,25 @@ TMP="${EXPORT_DIR}/.spendlogs-${DAY}.jsonl.gz.tmp"
 OUT="${EXPORT_DIR}/spendlogs-${DAY}.jsonl.gz"
 
 # Bring up the Presidio pair just for this run (the analyzer's NLP model holds
-# ~1.5 GB RAM — not worth keeping resident for a once-nightly job), and stop it
-# again on ANY exit path so a failed export doesn't leave it running.
-# Trap installed BEFORE `up` so a partially-started pair still gets stopped.
+# ~1.5 GB RAM — not worth keeping resident for a once-nightly job), and REMOVE
+# it again on ANY exit path so a failed export doesn't leave it running.
+# The pair is treated as disposable — created fresh every run (--force-recreate),
+# removed (rm -sf), never restarted from stopped: re-starting a stopped analyzer
+# container wedged with the gunicorn master up but no worker ever booting
+# (image 2.2.362, observed 2026-08-05 — accepted connections, answered nothing).
+# The containers are stateless, so a fresh create costs nothing.
+# Trap installed BEFORE `up` so a partially-started pair still gets removed.
 # Cleanup must never mask the export's own exit code (|| true), and a failed
 # run must not leave a stale .tmp behind (harmless content — post-scrub only —
 # but it would accumulate).
-trap 'docker compose --profile scrub stop presidio-analyzer presidio-anonymizer >/dev/null 2>&1 || true; rm -f "$TMP"' EXIT
-docker compose --profile scrub up -d presidio-analyzer presidio-anonymizer
+trap 'docker compose --profile scrub rm -sf presidio-analyzer presidio-anonymizer >/dev/null 2>&1 || true; rm -f "$TMP"' EXIT
+docker compose --profile scrub up -d --force-recreate presidio-analyzer presidio-anonymizer
+# --max-time bounds each probe: a wedged service that accepts but never answers
+# must fail this loop at ~2 min, not hang the run (and the nightly cron) forever.
 for i in $(seq 1 60); do
-  curl -fsS http://127.0.0.1:5002/health >/dev/null 2>&1 \
-    && curl -fsS http://127.0.0.1:5001/health >/dev/null 2>&1 && break
-  [[ $i -eq 60 ]] && { echo "presidio not healthy after 120s" >&2; exit 1; }
+  curl -fsS --max-time 5 http://127.0.0.1:5002/health >/dev/null 2>&1 \
+    && curl -fsS --max-time 5 http://127.0.0.1:5001/health >/dev/null 2>&1 && break
+  [[ $i -eq 60 ]] && { echo "presidio not healthy after ~2min" >&2; exit 1; }
   sleep 2
 done
 
