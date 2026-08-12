@@ -7,9 +7,11 @@ repository. Human contributors should read it too — it documents the non-obvio
 
 The **deployment definition** for the Team LLM Proxy: a self-hosted [LiteLLM](https://docs.litellm.ai)
 gateway that gives Parity teammates budgeted, per-user access to Kimi (Moonshot AI) and OpenRouter
-models behind one OpenAI-compatible HTTPS API. It is a small ops repo — Docker Compose, a Caddyfile,
-a LiteLLM `config.yaml`, two shell scripts, and docs. **There is no application source code to build
-or test.** See `README.md` for the overview and `RUNBOOK.md` for operations.
+models — plus `deepseek-flash`, served by **Parity's own vLLM GPU pod** over a reverse SSH tunnel
+(`RUNBOOK.md` § I) — behind one OpenAI-compatible HTTPS API. It is a small ops repo — Docker
+Compose, a Caddyfile, a LiteLLM `config.yaml`, a handful of scripts, and docs. **There is no
+application source code to build or test.** See `README.md` for the overview and `RUNBOOK.md` for
+operations.
 
 This config drives a **live, shared production service** at `https://llm.substrate.dev`. Treat
 changes accordingly.
@@ -21,8 +23,9 @@ changes accordingly.
    tracked. If you add a new secret, add it to `.env.example` with a `REPLACE_*` placeholder — never
    a real value.
 2. **Keep the LiteLLM image tag pinned.** In `docker-compose.yml` the `litellm` image is a pinned
-   version (e.g. `:v1.90.0`), never `latest`/`main-latest` — LiteLLM ships breaking changes. To
-   upgrade, bump the tag deliberately and note it.
+   version (e.g. `:v1.95.0`), never `latest`/`main-latest` — LiteLLM ships breaking changes. To
+   upgrade, bump the tag deliberately, note it, and re-run the streaming-cost spot-check
+   (`RUNBOOK.md` § "Pricing model").
 3. **Never rotate `LITELLM_SALT_KEY` after launch.** It encrypts provider keys stored in Postgres;
    rotating it invalidates them.
 4. **Don't run commands against the live host or push to GitHub on the user's behalf** unless they
@@ -39,15 +42,23 @@ changes accordingly.
   when you edit a line it explains.
 - **Hostname** lives in exactly one place: the site label in `Caddyfile`. Changing the public URL is
   a one-line edit there plus a Caddy reload (see `RUNBOOK.md` § F).
-- **Models & pricing** live in `config.yaml`. Prefer letting OpenRouter's live cost and LiteLLM's
-  auto-fetched price map drive spend; only hardcode `input_/output_cost_per_token` for a model too
-  new for the map, and remove the pin once the map catches up.
+- **Models & pricing** live in `config.yaml`. OpenRouter returns the real per-call cost and
+  LiteLLM records it directly, streamed calls included (verified on-box 2026-08-12) — so
+  **OpenRouter entries must stay pin-free**: a hardcoded `input_/output_cost_per_token` pin
+  *overrides* the real cost. Pins belong in exactly two cases: a provider that returns no
+  per-call cost (Kimi/Moonshot — pin models too new for LiteLLM's auto-fetched price map, and
+  remove the pin once the map catches up), and the deliberate budget-throttle pin on the
+  self-hosted `deepseek-flash` (see the comment on that entry).
 - **"Enable model X" requests are usually a no-op.** The `openrouter/*` wildcard in `config.yaml`
   already serves every OpenRouter model by its full ID (`openrouter/<org>/<model>`), with spend
   metered from OpenRouter's real per-call cost — no config change, no price pin, no deploy. Only
   edit `config.yaml` if (a) the requester wants a short curated alias, or (b) it's a **Kimi/
   Moonshot** model — those need a `model_list` entry and, if too new for LiteLLM's price map, a
   temporary cost pin (Moonshot returns no per-call cost). Point teammates at README § "Models".
+- **`deepseek-flash` is special:** it's served by Parity's own vLLM GPU pod through a reverse SSH
+  tunnel into the box, with automatic fallback to OpenRouter when the pod is down or saturated.
+  Changes to it can involve the box (tunnel account, ufw) as well as `config.yaml` — read
+  `RUNBOOK.md` § I before touching any of it.
 
 ## Repository layout
 

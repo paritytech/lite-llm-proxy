@@ -9,7 +9,8 @@ adds Claude-specific notes and repeats the rules that must never be missed.
 ## The repo in one line
 
 Deployment definition for the **Team LLM Proxy** — a self-hosted LiteLLM gateway (Docker Compose:
-Caddy + LiteLLM + Postgres) giving Parity teammates budgeted access to Kimi and OpenRouter models.
+Caddy + LiteLLM + Postgres) giving Parity teammates budgeted access to Kimi and OpenRouter models,
+plus `deepseek-flash` served by Parity's own vLLM GPU pod via a reverse SSH tunnel (RUNBOOK § I).
 It drives a **live production service** at `https://llm.substrate.dev`. No app source, no build, no
 test suite — it's config, scripts, and docs.
 
@@ -19,6 +20,8 @@ test suite — it's config, scripts, and docs.
    `.env.example` with `REPLACE_*` placeholders is tracked.
 2. **Keep the LiteLLM image tag pinned** in `docker-compose.yml` — never `latest`.
 3. **Never rotate `LITELLM_SALT_KEY`** after launch — it invalidates DB-stored provider keys.
+   Same for **`LOG_EXPORT_SESSION_SALT`** — rotating it unlinks corpus sessions spanning the
+   rotation date.
 4. **Don't deploy, reload the live host, mint/revoke keys, push to GitHub, or file tickets** unless
    the user asks in this session. Editing files is safe; real-world actions need explicit go-ahead.
 5. **SPDX header on every new code/config file:**
@@ -38,6 +41,12 @@ test suite — it's config, scripts, and docs.
   serves any OpenRouter model by full ID with live cost tracking (see AGENTS.md § Conventions).
   Config edits are only needed for a curated alias, or for Kimi/Moonshot models (menu entry +
   possible temporary price pin).
+- **Never add price pins to OpenRouter entries** — OpenRouter's real per-call cost is recorded
+  directly (streamed included, verified 2026-08-12), and a pin overrides it. Pins are only for
+  Kimi models missing from the price map, and the deliberate `deepseek-flash` budget throttle.
+- **`deepseek-flash` is self-hosted** (Parity vLLM pod → reverse SSH tunnel into the box, with
+  OpenRouter fallback). Its moving parts span the box (tunnel account, sshd, ufw) and
+  `config.yaml` — read RUNBOOK § I before changing it.
 - After changing deploy/ops behavior, update `RUNBOOK.md` (and `README.md` if it's user-facing).
 - There is no automated test or lint step. "Verification" here means: YAML still parses, the SPDX
   header is present, no secret leaked, and `RUNBOOK.md`/`README.md` still match reality.
