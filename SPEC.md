@@ -4,9 +4,11 @@ A self-hosted **LiteLLM proxy** giving 5–20 Parity teammates rate-limited, bud
 per-user access to a shared **Kimi (Moonshot AI)** API subscription, fronted by HTTPS.
 
 Status: **shipped & live** at `https://llm.substrate.dev` (Caddy + LiteLLM + Postgres on the
-baremetal box). It now also fronts **OpenRouter** models alongside Kimi, and logs full
-request/response bodies as a training corpus (see
-`docs/specs/2026-07-22-request-logging-design.md`). This document captures
+baremetal box). Since launch it has grown beyond this spec: it fronts **OpenRouter** models
+alongside Kimi, logs full request/response bodies as a training corpus (see
+`docs/specs/2026-07-22-request-logging-design.md`), auto-deploys merged PRs via GitHub Actions
+(`RUNBOOK.md` § H), and serves `deepseek-flash` from **Parity's own vLLM GPU pod** through a
+reverse SSH tunnel with automatic OpenRouter fallback (`RUNBOOK.md` § I). This document captures
 the original design; `README.md` and `RUNBOOK.md` are the current, authoritative references.
 
 ---
