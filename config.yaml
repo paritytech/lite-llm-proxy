@@ -43,57 +43,42 @@ model_list:
       cache_read_input_token_cost: 0.0000003
 
   # ---- OpenRouter (base openrouter.ai/api/v1) ----
-  # OpenRouter returns the actual per-call cost and LiteLLM records it directly. Pins
-  # <= v1.93 dropped that inline cost on STREAMING responses (BerriAI/litellm#16021)
-  # and fell back to the price map, so map-missing models metered $0 when streamed —
-  # hence the temporary alias pins below at OpenRouter list prices (2026-07-23/24).
-  # docker-compose.yml now pins v1.95.0, which contains the upstream fix (PR #32255,
-  # stable since v1.94.0): after deploying, run the streaming spot-check in RUNBOOK
-  # § "Pricing model", and once it passes REMOVE the alias pins below so the real
-  # per-call cost wins again. Models the map covers (claude-sonnet, gemini-pro,
-  # deepseek, deepseek-r1) are pin-free already. The map itself is auto-fetched from
-  # GitHub at startup and refreshed by the nightly cron (POST /reload/model_cost_map).
+  # OpenRouter returns the actual per-call cost and LiteLLM records it directly —
+  # including on STREAMED responses since v1.94.0 (upstream fix PR #32255 for
+  # BerriAI/litellm#16021; on <= v1.93 streamed calls fell back to the price map and
+  # map-missing models metered $0, which is why these aliases carried temporary
+  # list-price pins until 2026-08-12). Spot-check PASSED on this deployment
+  # 2026-08-12: a streamed wildcard call to a map-missing model recorded spend equal
+  # to OpenRouter's reported cost, so the pins came off. Do NOT re-add price pins to
+  # OpenRouter models — a pin OVERRIDES the real per-call cost. Pins belong only on
+  # providers that return no cost (Kimi above) or as a deliberate budget throttle
+  # (deepseek-flash below). The price map is auto-fetched from GitHub at startup and
+  # refreshed by the nightly cron (POST /reload/model_cost_map); for OpenRouter it
+  # only matters as a fallback, never the primary source.
   - model_name: claude-sonnet
     litellm_params:
       model: openrouter/anthropic/claude-sonnet-4.6
       api_key: os.environ/OPENROUTER_API_KEY
-  # Missing from the price map — pinned so streamed calls don't meter $0.
   - model_name: claude-opus
     litellm_params:
       model: openrouter/anthropic/claude-opus-4.8
       api_key: os.environ/OPENROUTER_API_KEY
-      input_cost_per_token: 0.000005
-      output_cost_per_token: 0.000025
-      cache_read_input_token_cost: 0.0000005
-      cache_creation_input_token_cost: 0.00000625
-  # Missing from the price map — pinned so streamed calls don't meter $0.
   - model_name: gpt-5
     litellm_params:
       model: openrouter/openai/gpt-5.5
       api_key: os.environ/OPENROUTER_API_KEY
-      input_cost_per_token: 0.000005
-      output_cost_per_token: 0.00003
-      cache_read_input_token_cost: 0.0000005
-  # Missing from the price map — pinned so streamed calls don't meter $0.
   - model_name: gpt-5-mini
     litellm_params:
       model: openrouter/openai/gpt-5.4-mini
       api_key: os.environ/OPENROUTER_API_KEY
-      input_cost_per_token: 0.00000075
-      output_cost_per_token: 0.0000045
-      cache_read_input_token_cost: 0.000000075
   - model_name: gemini-pro
     litellm_params:
       model: openrouter/google/gemini-2.5-pro
       api_key: os.environ/OPENROUTER_API_KEY
-  # Missing from the price map — pinned so streamed calls don't meter $0.
   - model_name: gemini-flash
     litellm_params:
       model: openrouter/google/gemini-3.5-flash
       api_key: os.environ/OPENROUTER_API_KEY
-      input_cost_per_token: 0.0000015
-      output_cost_per_token: 0.000009
-      cache_read_input_token_cost: 0.00000015
   - model_name: deepseek
     litellm_params:
       model: openrouter/deepseek/deepseek-v3.2
@@ -102,31 +87,18 @@ model_list:
     litellm_params:
       model: openrouter/deepseek/deepseek-r1
       api_key: os.environ/OPENROUTER_API_KEY
-  # Missing from the price map — pinned so streamed calls don't meter $0
-  # (openrouter.ai list prices, 2026-07-24: $0.435 / 1M in, $0.87 / 1M out).
   - model_name: deepseek-v4-pro
     litellm_params:
       model: openrouter/deepseek/deepseek-v4-pro
       api_key: os.environ/OPENROUTER_API_KEY
-      input_cost_per_token: 0.000000435
-      output_cost_per_token: 0.00000087
-      cache_read_input_token_cost: 0.000000003625
-  # Missing from the price map — pinned so streamed calls don't meter $0
-  # (openrouter.ai list prices, 2026-07-24: $0.30 / 1M in, $1.20 / 1M out).
   - model_name: minimax-m3
     litellm_params:
       model: openrouter/minimax/minimax-m3
       api_key: os.environ/OPENROUTER_API_KEY
-      input_cost_per_token: 0.0000003
-      output_cost_per_token: 0.0000012
-      cache_read_input_token_cost: 0.00000006
-  # Missing from the price map — pinned so streamed calls don't meter $0.
   - model_name: llama-4-maverick
     litellm_params:
       model: openrouter/meta-llama/llama-4-maverick
       api_key: os.environ/OPENROUTER_API_KEY
-      input_cost_per_token: 0.0000002
-      output_cost_per_token: 0.0000008
 
   # Wildcard catch-all: any other OpenRouter model by its full ID, e.g.
   #   "model": "openrouter/qwen/qwen3-max".
