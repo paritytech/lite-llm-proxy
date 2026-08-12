@@ -553,6 +553,22 @@ EOF
 ```
 
 ```bash
+# 2b. One-time: firewall. ufw's default-deny also covers CONTAINER -> HOST
+#     traffic, and its deny is a silent DROP: without this rule the litellm
+#     container's SYNs to 172.17.0.1:18000 just vanish, so connects hang out a
+#     long client timeout instead of failing fast — which breaks BOTH the live
+#     tunnel path and the instant OpenRouter fallback (hit on the first deploy,
+#     2026-08-12: deepseek-flash requests hung instead of falling back).
+#     Scoped tight: Docker-network sources only, this one ip:port only —
+#     nothing here is reachable from the internet either way.
+sudo ufw allow from 172.16.0.0/12 to 172.17.0.1 port 18000 proto tcp comment 'containers -> vllm reverse tunnel (RUNBOOK § I)'
+#     Verify from inside the container — expect ConnectionRefusedError in <1s
+#     while the tunnel is down (refused = reachable-but-nobody-listening; a
+#     timeout means the rule didn't take):
+docker compose exec litellm python3 -c "import socket; socket.create_connection(('host.docker.internal', 18000), timeout=5)"
+```
+
+```bash
 # 3. Validate BEFORE reloading (a broken sshd config = locked out of the box).
 #    Keep this SSH session open until a NEW laptop login is proven to work.
 sudo sshd -t
@@ -609,6 +625,7 @@ sudo pkill -u vllm-tunnel
 #   Traffic falls back to OpenRouter transparently; delete the account, the
 #   sshd_config Match block, and the config.yaml entry at leisure.
 # - 172.17.0.1 is Docker's default docker0 gateway. If the daemon's default
-#   bridge subnet is ever customised, update BOTH sshd's PermitListen and the
-#   pod's -R bind address (host.docker.internal follows the daemon automatically).
+#   bridge subnet is ever customised, update sshd's PermitListen, the pod's -R
+#   bind address, AND the ufw rule from step 2b (host.docker.internal follows
+#   the daemon automatically).
 ```
