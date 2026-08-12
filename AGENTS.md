@@ -57,8 +57,13 @@ changes accordingly.
   temporary cost pin (Moonshot returns no per-call cost). Point teammates at README § "Models".
 - **`deepseek-flash` is special:** it's served by Parity's own vLLM GPU pod through a reverse SSH
   tunnel into the box, with automatic fallback to OpenRouter when the pod is down or saturated.
-  Changes to it can involve the box (tunnel account, ufw) as well as `config.yaml` — read
-  `RUNBOOK.md` § I before touching any of it.
+  It ships as **three aliases** with different routing contracts: `deepseek-flash` (pod first,
+  OpenRouter fallback), `deepseek-flash-parity` (pod ONLY — no fallback, the hard
+  prompts-stay-in-infra guarantee; fails fast when the pod is down), and
+  `deepseek-flash-openrouter` (OpenRouter only). Keep the two `hosted_vllm` entries'
+  `litellm_params` in lockstep, and mind the parallel caps: they're per entry and sum to the
+  pod's ~32-parallel knee (24 + 8). Changes can involve the box (tunnel account, ufw) as well as
+  `config.yaml` — read `RUNBOOK.md` § I before touching any of it.
 
 ## Repository layout
 
