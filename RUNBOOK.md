@@ -487,3 +487,127 @@ curl -sS https://llm.substrate.dev/health/liveliness
 From then on, merging a PR **is** the deploy. On-box manual edits should be rare and are made
 as the deploy user (`sudo -iu deploy`) — the next CI rsync (`--delete`) overwrites any drift
 from the repo, except inside the excluded paths listed above.
+
+---
+
+## I. Self-hosted vLLM backend (reverse SSH tunnel)
+
+Design (why a *reverse* tunnel): the vLLM GPU pod (Runpod, image
+<https://github.com/paritytech/vllm-parity>) serving `deepseek-flash` has **no stable public
+address** — every relaunch gets a new IP/port — and Runpod's network drops bulk parallel inbound
+TCP connections (256 direct connections fail; 256 multiplexed through one SSH connection are
+fine). So the pod dials **out** to this box (stable at `llm.substrate.dev`) and opens a reverse
+tunnel; all LiteLLM→vLLM traffic multiplexes back through that single connection:
+
+```text
+pod: vLLM on 127.0.0.1:9001
+ └─ autossh -R 172.17.0.1:18000:127.0.0.1:9001 vllm-tunnel@llm.substrate.dev
+     └─ box: sshd listens on 172.17.0.1:18000
+        (docker0 gateway: containers CAN reach it, the internet canNOT;
+         the host's 127.0.0.1 would be invisible to containers)
+         └─ litellm container → http://host.docker.internal:18000/v1
+            (extra_hosts in docker-compose.yml maps that name to the same gateway IP)
+```
+
+A pod relaunch needs **nothing** on our side: the pod re-dials and the same port comes back.
+While it's down, `deepseek-flash` transparently falls back to OpenRouter (config.yaml
+`fallbacks`), at real OpenRouter cost.
+
+```bash
+# 1. One-time: locked-down tunnel account. All this account can EVER do is bind
+#    that one port: nologin shell, and "restrict" in authorized_keys kills
+#    pty/X11/agent/exec while "port-forwarding" re-allows only forwarding
+#    (narrowed further to one listen address by the Match block in step 2).
+sudo useradd -r -m -s /usr/sbin/nologin vllm-tunnel
+sudo install -d -m 700 -o vllm-tunnel -g vllm-tunnel /home/vllm-tunnel/.ssh
+# Paste the POD's public key (from its operator) after the options, ONE line:
+echo 'restrict,port-forwarding ssh-ed25519 AAAA_POD_PUBLIC_KEY vllm' \
+  | sudo tee /home/vllm-tunnel/.ssh/authorized_keys
+sudo chown vllm-tunnel:vllm-tunnel /home/vllm-tunnel/.ssh/authorized_keys
+sudo chmod 600 /home/vllm-tunnel/.ssh/authorized_keys
+```
+
+```bash
+# 2. One-time: sshd policy for that account. APPEND to /etc/ssh/sshd_config itself,
+#    NOT a sshd_config.d drop-in: Ubuntu includes drop-ins at the TOP of the main
+#    file and a Match block stays open past the end of its own file — it would
+#    swallow the main config below the Include. End of the main file is the one
+#    spot where "until next Match or EOF" is unambiguous.
+sudo tee -a /etc/ssh/sshd_config >/dev/null <<'EOF'
+
+# vllm-tunnel: reverse tunnel for the self-hosted vLLM pod (RUNBOOK § I).
+# May ONLY bind 172.17.0.1:18000 (docker0 gateway — container-reachable, not
+# internet-reachable). No shell, no local forwards, no pty, no agent/X11.
+Match User vllm-tunnel
+    AllowTcpForwarding remote
+    GatewayPorts clientspecified
+    PermitListen 172.17.0.1:18000
+    PermitOpen none
+    PermitTTY no
+    AllowAgentForwarding no
+    X11Forwarding no
+    ClientAliveInterval 15
+    ClientAliveCountMax 4
+EOF
+```
+
+```bash
+# 3. Validate BEFORE reloading (a broken sshd config = locked out of the box).
+#    Keep this SSH session open until a NEW laptop login is proven to work.
+sudo sshd -t
+#    Expect: no output. Then eyeball the effective policy for the tunnel user:
+sudo sshd -T -C user=vllm-tunnel,host=pod,addr=203.0.113.1 \
+  | grep -Ei 'allowtcpforwarding|permitlisten|permittty|gatewayports'
+sudo systemctl reload ssh
+# [laptop, NEW terminal] must still log in fine before you close anything:
+ssh <you>@llm.substrate.dev true
+```
+
+```bash
+# 4. Send the pod operator (a) our host key to pin, (b) the client line to bake
+#    into the Runpod template so the pod self-registers on boot:
+# [laptop] our host key:
+ssh-keyscan -t ed25519 llm.substrate.dev
+#    Client line (pod side; -M 0 = rely on ServerAlive keepalives, not a monitor port):
+#      autossh -M 0 -N -T \
+#        -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+#        -o StrictHostKeyChecking=yes \
+#        -R 172.17.0.1:18000:127.0.0.1:9001 vllm-tunnel@llm.substrate.dev
+#    ExitOnForwardFailure is load-bearing: without it, a reconnect that fails to
+#    re-bind the port looks "connected" while forwarding nothing, and autossh
+#    never retries. The -R bind address must be LITERALLY 172.17.0.1 — sshd's
+#    PermitListen rejects anything else.
+```
+
+```bash
+# 5. Verify end-to-end, both directions (tunnel UP, then tunnel DOWN):
+ss -tlnp | grep 18000
+#    Expect: sshd LISTEN on 172.17.0.1:18000.
+curl -s http://172.17.0.1:18000/v1/models
+#    Expect: vLLM's model list. The served model id here MUST match the
+#    hosted_vllm/<name> in config.yaml's deepseek-flash entry.
+docker compose exec litellm python3 -c \
+  "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:18000/v1/models', timeout=5).read().decode())"
+#    Expect: same JSON — proves the container→host-gateway path.
+#    Then one real completion through the proxy with "model": "deepseek-flash"
+#    (curl as in § C), and one more with the pod STOPPED — expect a slower,
+#    OpenRouter-served success (fallback), NOT an error. In /ui Logs the two rows
+#    show provider hosted_vllm vs openrouter respectively.
+```
+
+```bash
+# Ops notes:
+# - Pod relaunched => nothing to do here (it re-dials; same port comes back).
+# - Tunnel health at a glance: the `ss` line above. Dead tunnel is NOT an outage:
+#   deepseek-flash falls back to OpenRouter (real cost) until the pod redials.
+# - Half-dead session still holding the port (pod reconnects but can't re-bind):
+sudo pkill -u vllm-tunnel
+#   kills only that account's sshd session; the pod's autossh redials in seconds.
+# - Kill switch (pod key compromised / decommissioned): comment out the line in
+#   /home/vllm-tunnel/.ssh/authorized_keys, then `sudo pkill -u vllm-tunnel`.
+#   Traffic falls back to OpenRouter transparently; delete the account, the
+#   sshd_config Match block, and the config.yaml entry at leisure.
+# - 172.17.0.1 is Docker's default docker0 gateway. If the daemon's default
+#   bridge subnet is ever customised, update BOTH sshd's PermitListen and the
+#   pod's -R bind address (host.docker.internal follows the daemon automatically).
+```
