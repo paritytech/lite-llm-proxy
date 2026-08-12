@@ -201,7 +201,13 @@ rm /tmp/ct.txt
   catches up. Pins must include `cache_read_input_token_cost`: Moonshot auto-caches context and
   bills cache hits at ~1/5–1/10 of the input price, so an input/output-only pin overcounts
   heavily on agentic workloads. (The ≥ v1.94.0 fix changes nothing here — Moonshot sends no
-  cost to report.)
+  cost to report.) **Spot-check PASSED 2026-08-12** (streamed `kimi-k2.7-code`, pinned): a
+  cold call recorded `spend = 0.00312015` = 3217 in × $0.95/1M + 16 out × $4.00/1M, and an
+  identical repeat with a 100% prompt cache hit recorded `spend = 0.00072323` =
+  3217 cached × $0.19/1M + 28 out × $4.00/1M — both exact to the last digit, so the input,
+  output, AND cache-read pins all apply. Re-run this two-call check (same ~4k-token prompt
+  twice, `stream_options.include_usage` on, compare spend-log rows against the pin
+  arithmetic) after an image bump or any pin change.
 - **Wildcard caveat — fixed at v1.94.0, verified on this box 2026-08-12:** a model reached via
   `openrouter/*` with no map entry used to meter $0 on *streaming* requests (a wildcard can't
   carry a pin). Our pinned image (v1.95.0) includes the upstream fix and the spot-check passed
@@ -512,7 +518,10 @@ pod: vLLM on 127.0.0.1:9001
 
 A pod relaunch needs **nothing** on our side: the pod re-dials and the same port comes back.
 While it's down, `deepseek-flash` transparently falls back to OpenRouter (config.yaml
-`fallbacks`), at real OpenRouter cost.
+`fallbacks`), at real OpenRouter cost. Its sibling aliases pin the routing instead:
+`deepseek-flash-parity` (pod ONLY) deliberately has no fallback — it fails fast while the pod
+is down, which is the hard prompts-stay-in-infra guarantee and the alias to use when testing
+the pod itself — and `deepseek-flash-openrouter` never touches the pod at all.
 
 ```bash
 # 1. One-time: locked-down tunnel account. All this account can EVER do is bind
@@ -602,7 +611,9 @@ ss -tlnp | grep 18000
 #    Expect: sshd LISTEN on 172.17.0.1:18000.
 curl -s http://172.17.0.1:18000/v1/models
 #    Expect: vLLM's model list. The served model id here MUST match the
-#    hosted_vllm/<name> in config.yaml's deepseek-flash entry.
+#    hosted_vllm/<name> in BOTH pod-backed config.yaml entries (deepseek-flash
+#    AND deepseek-flash-parity — kept in lockstep; updating only one leaves the
+#    other 404-ing). After editing: `grep -c REPLACE_WITH config.yaml` → 0.
 docker compose exec litellm python3 -c \
   "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:18000/v1/models', timeout=5).read().decode())"
 #    Expect: same JSON — proves the container→host-gateway path.
@@ -610,20 +621,27 @@ docker compose exec litellm python3 -c \
 #    (curl as in § C), and one more with the pod STOPPED — expect a slower,
 #    OpenRouter-served success (fallback), NOT an error. In /ui Logs the two rows
 #    show provider hosted_vllm vs openrouter respectively.
+#    Also while the pod is STOPPED: "model": "deepseek-flash-parity" must FAIL
+#    fast (<1s connection error — it has no fallback by design; a hang means the
+#    step-2b ufw rule is missing), and "deepseek-flash-openrouter" must succeed.
 ```
 
 ```bash
 # Ops notes:
 # - Pod relaunched => nothing to do here (it re-dials; same port comes back).
-# - Tunnel health at a glance: the `ss` line above. Dead tunnel is NOT an outage:
-#   deepseek-flash falls back to OpenRouter (real cost) until the pod redials.
+# - Tunnel health at a glance: the `ss` line above. Dead tunnel is NOT an outage
+#   for deepseek-flash (falls back to OpenRouter at real cost until the pod
+#   redials) — but deepseek-flash-parity IS down while it's dead: no fallback,
+#   fail-fast, by design.
 # - Half-dead session still holding the port (pod reconnects but can't re-bind):
 sudo pkill -u vllm-tunnel
 #   kills only that account's sshd session; the pod's autossh redials in seconds.
 # - Kill switch (pod key compromised / decommissioned): comment out the line in
 #   /home/vllm-tunnel/.ssh/authorized_keys, then `sudo pkill -u vllm-tunnel`.
-#   Traffic falls back to OpenRouter transparently; delete the account, the
-#   sshd_config Match block, and the config.yaml entry at leisure.
+#   deepseek-flash traffic falls back to OpenRouter transparently, but
+#   deepseek-flash-parity goes HARD DOWN (no fallback by design) — announce it
+#   or repoint that alias. Delete the account, the sshd_config Match block, and
+#   both pod-backed config.yaml entries at leisure.
 # - 172.17.0.1 is Docker's default docker0 gateway. If the daemon's default
 #   bridge subnet is ever customised, update sshd's PermitListen, the pod's -R
 #   bind address, AND the ufw rule from step 2b (host.docker.internal follows

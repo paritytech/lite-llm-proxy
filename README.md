@@ -56,7 +56,9 @@ Send one of these as the `"model"` field:
 | `deepseek` | DeepSeek V3.2 |
 | `deepseek-r1` | DeepSeek R1 (reasoning) |
 | `deepseek-v4-pro` | DeepSeek V4 Pro |
-| `deepseek-flash` | DeepSeek V4 Flash — **self-hosted on Parity's own GPU** (testing) |
+| `deepseek-flash` | DeepSeek V4 Flash — **self-hosted on Parity's own GPU** (testing), cloud fallback |
+| `deepseek-flash-parity` | DeepSeek V4 Flash — self-hosted **only**, no cloud fallback (testing; [details](#deepseek-flash-self-hosted-vs-openrouter)) |
+| `deepseek-flash-openrouter` | DeepSeek V4 Flash — OpenRouter **only**, never our GPU ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
 | `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
 
@@ -82,9 +84,9 @@ Notes:
   so only the ones in the table are available.
 - If a model is rejected with a permissions error, your key may be scoped to specific models —
   ask the admin to widen it.
-- `deepseek-flash` runs on **Parity's own GPU pod** (vLLM), not OpenRouter — prompts for it stay
-  on our infrastructure. If the pod is down or saturated, the proxy transparently retries the
-  same model on OpenRouter (normal cloud path), so you always get an answer.
+- `deepseek-flash` runs on **Parity's own GPU pod** (vLLM), not OpenRouter — and comes in three
+  routing flavors; see [`deepseek-flash`: self-hosted vs
+  OpenRouter](#deepseek-flash-self-hosted-vs-openrouter) just below.
 - Spend tracking on OpenRouter models — aliases and wildcard alike — uses OpenRouter's real
   per-call cost, **streamed calls included** (verified on our deployment 2026-08-12: recorded
   spend matches OpenRouter's reported cost exactly). Budgets enforce on that recorded spend.
@@ -92,6 +94,22 @@ Notes:
 **Using a model regularly?** Ask the admin (or open a PR) to add it as a named alias in
 `config.yaml` — that gives it a short name and puts it in the menu above. That's how
 `deepseek-v4-pro` and `minimax-m3` were added.
+
+#### `deepseek-flash`: self-hosted vs OpenRouter
+
+DeepSeek V4 Flash is the one model we serve from **Parity's own GPU pod** (vLLM), so it comes in
+three flavors. Same model, same API — the alias picks *where* the request is allowed to run:
+
+| Alias | Where it runs | When to use it |
+|---|---|---|
+| `deepseek-flash` | Parity GPU first; falls back to OpenRouter if the pod is down or saturated | Default — always answers |
+| `deepseek-flash-parity` | Parity GPU **only** — errors fast if the pod is unavailable | Prompts that must never leave Parity infra; testing the pod itself |
+| `deepseek-flash-openrouter` | OpenRouter **only** — never touches the pod | Comparing pod vs cloud; deliberately bypassing the pod |
+
+Privacy is the point of the split: requests served by the pod stay entirely on our
+infrastructure, while anything served by OpenRouter follows the normal cloud path. That means
+the default alias's fallback *can* send your prompt to OpenRouter — if that must never happen,
+use `deepseek-flash-parity` and be prepared to handle an error while the pod is down.
 
 ### From code (OpenAI SDK)
 
@@ -193,7 +211,7 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
                      (TLS)      (proxy)          (keys / budgets / usage / logs)
                                    │
                                    └──> 172.17.0.1:18000 ←─(reverse SSH tunnel)── vLLM GPU pod
-                                        (host, container-reachable only)          (deepseek-flash)
+                                        (host, container-reachable only)          (deepseek-flash, -parity)
 ```
 
 - **caddy** — reverse proxy + automatic Let's Encrypt TLS. The only container exposing ports (80, 443).
@@ -205,8 +223,10 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
   `deepseek-flash` ([paritytech/vllm-parity](https://github.com/paritytech/vllm-parity), rented
   GPU). It has no stable public address, so it dials **into** the box over a restricted SSH
   account and reverse-binds `172.17.0.1:18000` (docker0 gateway — reachable by containers, not
-  the internet). LiteLLM falls back to OpenRouter automatically when the pod is down or
-  saturated. Topology, setup, and ops: `RUNBOOK.md` § I.
+  the internet). When the pod is down or saturated, LiteLLM falls back to OpenRouter
+  automatically for `deepseek-flash` — but not for `deepseek-flash-parity`, which fails fast by
+  design (see [the models section](#deepseek-flash-self-hosted-vs-openrouter)). Topology, setup,
+  and ops: `RUNBOOK.md` § I.
 
 ### Repository layout
 

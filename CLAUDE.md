@@ -45,8 +45,11 @@ test suite — it's config, scripts, and docs.
   directly (streamed included, verified 2026-08-12), and a pin overrides it. Pins are only for
   Kimi models missing from the price map, and the deliberate `deepseek-flash` budget throttle.
 - **`deepseek-flash` is self-hosted** (Parity vLLM pod → reverse SSH tunnel into the box, with
-  OpenRouter fallback). Its moving parts span the box (tunnel account, sshd, ufw) and
-  `config.yaml` — read RUNBOOK § I before changing it.
+  OpenRouter fallback) and ships as **three aliases**: `deepseek-flash` (pod + fallback),
+  `deepseek-flash-parity` (pod ONLY — no fallback, the hard prompts-stay-in-infra guarantee),
+  and `deepseek-flash-openrouter` (cloud only). Keep the two `hosted_vllm` entries in lockstep;
+  their per-entry parallel caps sum to the pod's ~32 knee (24 + 8). Moving parts span the box
+  (tunnel account, sshd, ufw) and `config.yaml` — read RUNBOOK § I before changing any of it.
 - After changing deploy/ops behavior, update `RUNBOOK.md` (and `README.md` if it's user-facing).
 - There is no automated test or lint step. "Verification" here means: YAML still parses, the SPDX
   header is present, no secret leaked, and `RUNBOOK.md`/`README.md` still match reality.
