@@ -124,8 +124,8 @@ curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer
 # OpenRouter (curated alias + wildcard)
 curl -sS https://llm.substrate.dev/v1/chat/completions -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" -d '{"model":"claude-sonnet","messages":[{"role":"user","content":"Reply with exactly: pong"}]}'
 #    Expect: JSON with choices[0].message.content. The OpenRouter response includes a real
-#    "cost" field — that is what LiteLLM records on non-streaming calls like this one
-#    (streamed calls fall back to the price map / pins — see "Pricing model" below).
+#    "cost" field — that is what LiteLLM records, on streamed and non-streamed calls alike
+#    (verified 2026-08-12 — see "Pricing model" below).
 ```
 
 ---
@@ -187,15 +187,14 @@ rm /tmp/ct.txt
 
 ## Pricing model (how spend stays accurate, and why the UI can disagree with provider dashboards)
 
-- **OpenRouter** returns the real per-call cost; LiteLLM records that directly. Historically
-  that was **non-streaming only**: pins ≤ v1.93 dropped the inline cost on **streaming**
-  responses (BerriAI/litellm#16021) and fell back to the price map, so curated aliases missing
-  from the map (`claude-opus`, `gpt-5`, `gpt-5-mini`, `gemini-flash`, `llama-4-maverick`,
-  `deepseek-v4-pro`, `minimax-m3` as of 2026-07-24) metered **$0 on streamed calls** until they
-  were pinned in `config.yaml` at OpenRouter list prices. The upstream fix (PR #32255) landed in
-  stable v1.94.0, and `docker-compose.yml` now pins **v1.95.0** — after the next deploy, run the
-  streaming spot-check below, and once it passes **remove those alias pins** so the real
-  per-call cost wins again.
+- **OpenRouter** returns the real per-call cost; LiteLLM records that directly — **streaming
+  included** on the pinned v1.95.0 image (upstream fix PR #32255, stable since v1.94.0; on
+  ≤ v1.93 streamed responses dropped the inline cost — BerriAI/litellm#16021 — and fell back to
+  the price map, metering **$0** for map-missing models, which is why seven curated aliases
+  carried temporary list-price pins from 2026-07-24). **Spot-check PASSED 2026-08-12**: a
+  streamed wildcard call to a map-missing model (`openrouter/anthropic/claude-opus-4.8`)
+  recorded `spend = 0.00018`, exactly OpenRouter's reported cost — so the alias pins were
+  removed. Keep OpenRouter entries pin-free: a pin *overrides* the real per-call cost.
 - **Kimi / Moonshot** does not return cost, so spend comes from LiteLLM's price map. The map is
   fetched from GitHub at startup and refreshed daily by the reload cron. A model too new for the
   map (e.g. `kimi-k3`, `kimi-k2.7-code`) needs an explicit pin in `config.yaml` until the map
@@ -203,12 +202,14 @@ rm /tmp/ct.txt
   bills cache hits at ~1/5–1/10 of the input price, so an input/output-only pin overcounts
   heavily on agentic workloads. (The ≥ v1.94.0 fix changes nothing here — Moonshot sends no
   cost to report.)
-- **Wildcard caveat — fixed at v1.94.0, verify on deploy:** a model reached via `openrouter/*`
-  with no map entry used to meter $0 on *streaming* requests (a wildcard can't carry a pin).
-  Our pinned image (v1.95.0) includes the upstream fix. **Spot-check after deploying:** stream
-  one wildcard-model request, then confirm nonzero `spend` on its spend-log row. Until that
-  check passes, treat the OpenRouter key's own **credit limit as the backstop** (it remains
-  sensible defense-in-depth regardless).
+- **Wildcard caveat — fixed at v1.94.0, verified on this box 2026-08-12:** a model reached via
+  `openrouter/*` with no map entry used to meter $0 on *streaming* requests (a wildcard can't
+  carry a pin). Our pinned image (v1.95.0) includes the upstream fix and the spot-check passed
+  (streamed spend == OpenRouter's reported `cost`). Re-run the spot-check after any future
+  image bump: stream one wildcard-model request (`"stream": true`,
+  `"stream_options": {"include_usage": true}`), then confirm the spend-log row's `spend`
+  matches the final chunk's `cost`. The OpenRouter key's own **credit limit** stays on as
+  defense-in-depth.
 - **Comparing dashboards:** expect small residual gaps even when everything above is right —
   the LiteLLM UI buckets days in UTC while provider dashboards may use local time; OpenRouter's
   billed cost includes its BYOK/provider fees which the price map doesn't model; and map-priced

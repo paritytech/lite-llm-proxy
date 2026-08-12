@@ -84,10 +84,9 @@ Notes:
 - `deepseek-flash` runs on **Parity's own GPU pod** (vLLM), not OpenRouter — prompts for it stay
   on our infrastructure. If the pod is down or saturated, the proxy transparently retries the
   same model on OpenRouter (normal cloud path), so you always get an answer.
-- Spend tracking on wildcard models uses OpenRouter's real per-call cost. As of the pinned
-  LiteLLM (≥ v1.94.0) that includes **streamed** calls too; until the deploy-time spot-check
-  confirms it on our box (RUNBOOK § "Pricing model"), treat streamed wildcard spend as
-  best-effort. Budgets still apply to whatever is recorded.
+- Spend tracking on OpenRouter models — aliases and wildcard alike — uses OpenRouter's real
+  per-call cost, **streamed calls included** (verified on our deployment 2026-08-12: recorded
+  spend matches OpenRouter's reported cost exactly). Budgets enforce on that recorded spend.
 
 **Using a model regularly?** Ask the admin (or open a PR) to add it as a named alias in
 `config.yaml` — that gives it a short name and puts it in the menu above. That's how
@@ -295,20 +294,22 @@ request ──> litellm ──> Postgres LiteLLM_SpendLogs   (hot store: ATTRIBU
 
 ### How pricing stays accurate
 
-- **OpenRouter** returns the real per-call cost; LiteLLM records it directly. Our previous pin
-  (v1.90.0) dropped that inline cost on **streaming** calls
-  ([BerriAI/litellm#16021](https://github.com/BerriAI/litellm/issues/16021)); the current pin
-  (v1.95.0) includes the upstream fix (PR #32255). The temporary price pins on curated aliases
-  from that era stay in `config.yaml` until the deploy-time streaming spot-check passes
-  (`RUNBOOK.md` § "Pricing model") — then they come off so the real cost wins again.
+- **OpenRouter** returns the real per-call cost; LiteLLM records it directly — **streaming
+  included** since the v1.95.0 image (upstream fix PR #32255 for
+  [BerriAI/litellm#16021](https://github.com/BerriAI/litellm/issues/16021); our previous
+  v1.90.0 pin dropped inline cost on streamed calls). Verified on this deployment 2026-08-12
+  (`RUNBOOK.md` § "Pricing model"), after which the temporary list-price pins on curated
+  aliases came off — the real cost wins. OpenRouter aliases must stay **pin-free**: a pin
+  overrides the real per-call cost.
 - **Kimi / Moonshot** does not return cost, so spend comes from LiteLLM's price map, which is
   fetched from upstream at startup and refreshed daily by `scripts/reload-costmap.sh`. A model too
   new for the map needs a temporary price pin in `config.yaml` — including
   `cache_read_input_token_cost`, or cached tokens get metered at the full input price.
-- **Wildcard caveat (fixed at pinned v1.95.0, pending on-box verification):** an `openrouter/*`
+- **Wildcard caveat (fixed at pinned v1.95.0, verified on-box 2026-08-12):** an `openrouter/*`
   model with no map entry used to meter **$0** on *streaming* requests (a wildcard can't carry a
-  pin). Upstream fixed this in v1.94.0 (provider-reported stream cost). The OpenRouter key's own
-  credit limit stays on as the backstop. See `RUNBOOK.md` § "Pricing model" for the spot-check.
+  pin). Upstream fixed this in v1.94.0 (provider-reported stream cost) and our spot-check
+  confirmed it — streamed spend equals OpenRouter's reported cost. The OpenRouter key's own
+  credit limit stays on as defense-in-depth.
 
 ---
 
