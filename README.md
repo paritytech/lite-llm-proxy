@@ -57,7 +57,7 @@ Send one of these as the `"model"` field:
 | `deepseek-r1` | DeepSeek R1 (reasoning) |
 | `deepseek-v4-pro` | DeepSeek V4 Pro |
 | `deepseek-flash` | DeepSeek V4 Flash — **self-hosted on Parity's own GPU** (testing), cloud fallback |
-| `deepseek-flash-parity` | DeepSeek V4 Flash — self-hosted **only**, no cloud fallback ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
+| `deepseek-flash-parity` | DeepSeek V4 Flash — self-hosted **only**, no cloud fallback (testing; [details](#deepseek-flash-self-hosted-vs-openrouter)) |
 | `deepseek-flash-openrouter` | DeepSeek V4 Flash — OpenRouter **only**, never our GPU ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
 | `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
@@ -211,7 +211,7 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
                      (TLS)      (proxy)          (keys / budgets / usage / logs)
                                    │
                                    └──> 172.17.0.1:18000 ←─(reverse SSH tunnel)── vLLM GPU pod
-                                        (host, container-reachable only)          (deepseek-flash)
+                                        (host, container-reachable only)          (deepseek-flash, -parity)
 ```
 
 - **caddy** — reverse proxy + automatic Let's Encrypt TLS. The only container exposing ports (80, 443).
@@ -223,8 +223,10 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
   `deepseek-flash` ([paritytech/vllm-parity](https://github.com/paritytech/vllm-parity), rented
   GPU). It has no stable public address, so it dials **into** the box over a restricted SSH
   account and reverse-binds `172.17.0.1:18000` (docker0 gateway — reachable by containers, not
-  the internet). LiteLLM falls back to OpenRouter automatically when the pod is down or
-  saturated. Topology, setup, and ops: `RUNBOOK.md` § I.
+  the internet). When the pod is down or saturated, LiteLLM falls back to OpenRouter
+  automatically for `deepseek-flash` — but not for `deepseek-flash-parity`, which fails fast by
+  design (see [the models section](#deepseek-flash-self-hosted-vs-openrouter)). Topology, setup,
+  and ops: `RUNBOOK.md` § I.
 
 ### Repository layout
 

@@ -611,7 +611,9 @@ ss -tlnp | grep 18000
 #    Expect: sshd LISTEN on 172.17.0.1:18000.
 curl -s http://172.17.0.1:18000/v1/models
 #    Expect: vLLM's model list. The served model id here MUST match the
-#    hosted_vllm/<name> in config.yaml's deepseek-flash entry.
+#    hosted_vllm/<name> in BOTH pod-backed config.yaml entries (deepseek-flash
+#    AND deepseek-flash-parity — kept in lockstep; updating only one leaves the
+#    other 404-ing). After editing: `grep -c REPLACE_WITH config.yaml` → 0.
 docker compose exec litellm python3 -c \
   "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:18000/v1/models', timeout=5).read().decode())"
 #    Expect: same JSON — proves the container→host-gateway path.
@@ -627,15 +629,19 @@ docker compose exec litellm python3 -c \
 ```bash
 # Ops notes:
 # - Pod relaunched => nothing to do here (it re-dials; same port comes back).
-# - Tunnel health at a glance: the `ss` line above. Dead tunnel is NOT an outage:
-#   deepseek-flash falls back to OpenRouter (real cost) until the pod redials.
+# - Tunnel health at a glance: the `ss` line above. Dead tunnel is NOT an outage
+#   for deepseek-flash (falls back to OpenRouter at real cost until the pod
+#   redials) — but deepseek-flash-parity IS down while it's dead: no fallback,
+#   fail-fast, by design.
 # - Half-dead session still holding the port (pod reconnects but can't re-bind):
 sudo pkill -u vllm-tunnel
 #   kills only that account's sshd session; the pod's autossh redials in seconds.
 # - Kill switch (pod key compromised / decommissioned): comment out the line in
 #   /home/vllm-tunnel/.ssh/authorized_keys, then `sudo pkill -u vllm-tunnel`.
-#   Traffic falls back to OpenRouter transparently; delete the account, the
-#   sshd_config Match block, and the config.yaml entry at leisure.
+#   deepseek-flash traffic falls back to OpenRouter transparently, but
+#   deepseek-flash-parity goes HARD DOWN (no fallback by design) — announce it
+#   or repoint that alias. Delete the account, the sshd_config Match block, and
+#   both pod-backed config.yaml entries at leisure.
 # - 172.17.0.1 is Docker's default docker0 gateway. If the daemon's default
 #   bridge subnet is ever customised, update sshd's PermitListen, the pod's -R
 #   bind address, AND the ufw rule from step 2b (host.docker.internal follows

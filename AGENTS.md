@@ -48,7 +48,7 @@ changes accordingly.
   *overrides* the real cost. Pins belong in exactly two cases: a provider that returns no
   per-call cost (Kimi/Moonshot — pin models too new for LiteLLM's auto-fetched price map, and
   remove the pin once the map catches up), and the deliberate budget-throttle pin on the
-  self-hosted `deepseek-flash` (see the comment on that entry).
+  self-hosted `deepseek-flash` / `deepseek-flash-parity` entries (see the comments there).
 - **"Enable model X" requests are usually a no-op.** The `openrouter/*` wildcard in `config.yaml`
   already serves every OpenRouter model by its full ID (`openrouter/<org>/<model>`), with spend
   metered from OpenRouter's real per-call cost — no config change, no price pin, no deploy. Only
