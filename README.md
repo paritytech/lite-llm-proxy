@@ -1,7 +1,8 @@
 # Team LLM Proxy
 
-Shared, budgeted access to **Kimi (Moonshot AI)** and **OpenRouter** (Claude, GPT, Gemini,
-DeepSeek, Llama, … ~400+ models) for Parity teammates via a self-hosted
+Shared, budgeted access to **Kimi (Moonshot AI)**, **OpenRouter** (Claude, GPT, Gemini,
+DeepSeek, Llama, … ~400+ models), and **Parity's own self-hosted GPU serving**
+(`deepseek-flash`) for Parity teammates via a self-hosted
 [LiteLLM](https://docs.litellm.ai) proxy. One OpenAI-compatible API over HTTPS, gated by
 per-user virtual keys with individual budgets and usage tracking.
 
@@ -190,6 +191,9 @@ profile, started by the nightly export for a few minutes and bound to localhost 
 ```
 internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
                      (TLS)      (proxy)          (keys / budgets / usage / logs)
+                                   │
+                                   └──> 172.17.0.1:18000 ←─(reverse SSH tunnel)── vLLM GPU pod
+                                        (host, container-reachable only)          (deepseek-flash)
 ```
 
 - **caddy** — reverse proxy + automatic Let's Encrypt TLS. The only container exposing ports (80, 443).
@@ -197,6 +201,12 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
   changes). Listens on 4000 on the internal network only.
 - **postgres** — virtual keys, budgets, per-key spend, request logs. Persisted in a named volume,
   never published to the host.
+- **vLLM GPU pod** (not part of the compose stack) — Parity's self-hosted backend for
+  `deepseek-flash` ([paritytech/vllm-parity](https://github.com/paritytech/vllm-parity), rented
+  GPU). It has no stable public address, so it dials **into** the box over a restricted SSH
+  account and reverse-binds `172.17.0.1:18000` (docker0 gateway — reachable by containers, not
+  the internet). LiteLLM falls back to OpenRouter automatically when the pod is down or
+  saturated. Topology, setup, and ops: `RUNBOOK.md` § I.
 
 ### Repository layout
 
@@ -318,8 +328,13 @@ request ──> litellm ──> Postgres LiteLLM_SpendLogs   (hot store: ATTRIBU
 - **No secrets in this repo.** The real `.env` (master key, salt key, Postgres password, upstream
   Moonshot and OpenRouter keys) lives only on the host, chmod 600, and is git-ignored.
 - **Upstream keys never leave the server.** Teammates only ever hold their own scoped virtual keys.
-- **Network:** only ports 22/80/443 are open (`ufw`). LiteLLM (4000) and Postgres (5432) stay on
-  the internal Docker network.
+- **Network:** only ports 22/80/443 are open to the internet (`ufw`). LiteLLM (4000) and Postgres
+  (5432) stay on the internal Docker network. The vLLM tunnel port (18000) binds to the docker0
+  gateway address only — an internal ufw rule lets containers reach it; nothing external can.
+- **The vLLM pod's SSH access is caged.** The pod logs in as `vllm-tunnel`: no shell (`nologin`),
+  `restrict,port-forwarding` in `authorized_keys`, and an sshd `Match` block that allows exactly
+  one reverse bind (`172.17.0.1:18000`) — no local forwards, no pty, no agent/X11. Kill switch and
+  details: `RUNBOOK.md` § I.
 - **TLS everywhere** via Caddy + Let's Encrypt.
 - **`LITELLM_SALT_KEY` must not be rotated after launch** — it encrypts provider keys stored in the
   DB, and rotating it invalidates them.
