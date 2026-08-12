@@ -24,6 +24,13 @@ services:
     env_file: [.env]
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+    # Self-hosted vLLM backend (config.yaml "deepseek-flash"): the GPU pod's reverse
+    # SSH tunnel lands on the HOST at 172.17.0.1:18000 (docker0 gateway — the one host
+    # IP containers can always reach; the host's 127.0.0.1 is invisible to them).
+    # host-gateway resolves to that same gateway IP, so the container reaches the
+    # tunnel as http://host.docker.internal:18000. Setup + topology: RUNBOOK § I.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     expose:
       - "4000"

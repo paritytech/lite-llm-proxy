@@ -55,6 +55,7 @@ Send one of these as the `"model"` field:
 | `deepseek` | DeepSeek V3.2 |
 | `deepseek-r1` | DeepSeek R1 (reasoning) |
 | `deepseek-v4-pro` | DeepSeek V4 Pro |
+| `deepseek-flash` | DeepSeek V4 Flash — **self-hosted on Parity's own GPU** (testing) |
 | `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
 
@@ -80,6 +81,9 @@ Notes:
   so only the ones in the table are available.
 - If a model is rejected with a permissions error, your key may be scoped to specific models —
   ask the admin to widen it.
+- `deepseek-flash` runs on **Parity's own GPU pod** (vLLM), not OpenRouter — prompts for it stay
+  on our infrastructure. If the pod is down or saturated, the proxy transparently retries the
+  same model on OpenRouter (normal cloud path), so you always get an answer.
 - Spend tracking on wildcard models uses OpenRouter's real per-call cost. As of the pinned
   LiteLLM (≥ v1.94.0) that includes **streamed** calls too; until the deploy-time spot-check
   confirms it on our box (RUNBOOK § "Pricing model"), treat streamed wildcard spend as
