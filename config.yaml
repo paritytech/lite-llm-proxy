@@ -125,7 +125,7 @@ model_list:
     litellm_params:
       # Served model name: `curl 127.0.0.1:9001/v1/models` on the pod. Keep the
       # hosted_vllm/ prefix — it routes via LiteLLM's OpenAI-compatible vLLM provider.
-      model: hosted_vllm/REPLACE_WITH_SERVED_MODEL_NAME
+      model: hosted_vllm/deepseek-v4-flash-0731
       api_base: http://host.docker.internal:18000/v1
       api_key: os.environ/VLLM_API_KEY
       input_cost_per_token: 0.00000015
@@ -152,7 +152,7 @@ model_list:
   # only the cap and fallback behavior differ.
   - model_name: deepseek-flash-parity
     litellm_params:
-      model: hosted_vllm/REPLACE_WITH_SERVED_MODEL_NAME
+      model: hosted_vllm/deepseek-v4-flash-0731
       api_base: http://host.docker.internal:18000/v1
       api_key: os.environ/VLLM_API_KEY
       input_cost_per_token: 0.00000015
