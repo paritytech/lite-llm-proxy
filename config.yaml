@@ -133,14 +133,19 @@ model_list:
       # Pod benchmark (1x B300, 2026-08-08): throughput holds up to ~32 parallel
       # requests. Cap below that knee; excess spills to the fallback instead of
       # queueing on a saturated GPU. NOTE: caps are PER ENTRY — the pod's real
-      # ceiling is this cap PLUS deepseek-flash-parity's below (24 + 8 = 32).
-      max_parallel_requests: 24
+      # ceiling is this cap PLUS both pod-ONLY entries' below (20 + 8 + 4 = 32).
+      # The versioned twin's 4 slots came out of THIS entry's former 24: over-cap
+      # traffic here spills gracefully to OpenRouter, while over-cap parity
+      # traffic hard-429s — so the squeeze belongs on the alias that degrades soft.
+      max_parallel_requests: 20
 
-  # Routing variants of the same model (added 2026-08-12). Same served model, same
-  # backend — only WHERE the request is allowed to run differs:
-  #   deepseek-flash            pod first, OpenRouter fallback (above)
-  #   deepseek-flash-parity     pod ONLY  — no fallback, hard in-infra guarantee
-  #   deepseek-flash-openrouter OpenRouter ONLY — never touches the pod
+  # Routing variants of the same model (added 2026-08-12, versioned alias 2026-08-17).
+  # Same served model, same backend — only WHERE the request is allowed to run (and
+  # whether the version is pinned in the name) differs:
+  #   deepseek-flash                 pod first, OpenRouter fallback (above)
+  #   deepseek-flash-parity          pod ONLY — no fallback, hard in-infra guarantee
+  #   deepseek-flash-parity-v4-0731  pod ONLY, version-explicit twin of the above
+  #   deepseek-flash-openrouter      OpenRouter ONLY — never touches the pod
   #
   # Pod ONLY: deliberately NO entry in litellm_settings.fallbacks, so a dead
   # pod/tunnel is a fast error, never a silent OpenRouter hop. This is the hard
@@ -148,8 +153,8 @@ model_list:
   # soft — its fallback ships the prompt to OpenRouter), and the one to use when
   # testing the pod, where a transparent fallback would mask an outage. Over its
   # parallel cap it 429s instead of spilling — intended. Keep litellm_params in
-  # lockstep with deepseek-flash above (served model name, api_base, cost pin);
-  # only the cap and fallback behavior differ.
+  # lockstep across ALL THREE hosted_vllm entries (served model name, api_base,
+  # cost pin); only the caps and fallback behavior differ.
   - model_name: deepseek-flash-parity
     litellm_params:
       model: hosted_vllm/deepseek-v4-flash-0731
@@ -157,7 +162,27 @@ model_list:
       api_key: os.environ/VLLM_API_KEY
       input_cost_per_token: 0.00000015
       output_cost_per_token: 0.0000004
+      # Unchanged at 8 since launch — the versioned twin's slots were carved out of
+      # deepseek-flash's cap instead, so existing users of THIS alias keep their
+      # capacity (see deepseek-flash's cap note for the 20 + 8 + 4 = 32 arithmetic).
       max_parallel_requests: 8
+
+  # Version-EXPLICIT twin of deepseek-flash-parity: identical routing contract
+  # (pod ONLY, no fallback), but the name pins exactly which model the pod serves,
+  # for users who want to know what they're getting rather than trust a floating
+  # alias. MAINTENANCE RULE: this name hard-codes the pod's model version — whenever
+  # the pod is redeployed with a new model, add a new alias matching the new served
+  # model's version (keeping this one only while the old model is still served) and
+  # update the model tables in README.md and the alias lists in AGENTS.md /
+  # CLAUDE.md in the same PR.
+  - model_name: deepseek-flash-parity-v4-0731
+    litellm_params:
+      model: hosted_vllm/deepseek-v4-flash-0731
+      api_base: http://host.docker.internal:18000/v1
+      api_key: os.environ/VLLM_API_KEY
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000004
+      max_parallel_requests: 4
 
   # OpenRouter ONLY: a curated name for what the openrouter/* wildcard already
   # serves — same full ID as deepseek-flash's fallback target, useful for comparing
@@ -196,7 +221,8 @@ litellm_settings:
   # openrouter/* wildcard above) — users get a slower, paid answer instead of an
   # error, and pod restarts stay invisible. Note: fallback traffic DOES leave our
   # infra (normal OpenRouter path). Verify both directions in RUNBOOK § I step 5.
-  # deepseek-flash-parity has deliberately NO entry here — its whole contract is
-  # fail-fast, in-infra only (see its model_list comment).
+  # deepseek-flash-parity AND deepseek-flash-parity-v4-0731 have deliberately NO
+  # entries here — their whole contract is fail-fast, in-infra only (see their
+  # model_list comments).
   fallbacks:
     - deepseek-flash: ["openrouter/deepseek/deepseek-v4-flash-0731"]

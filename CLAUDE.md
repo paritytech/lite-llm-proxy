@@ -45,11 +45,16 @@ test suite — it's config, scripts, and docs.
   directly (streamed included, verified 2026-08-12), and a pin overrides it. Pins are only for
   Kimi models missing from the price map, and the deliberate `deepseek-flash` budget throttle.
 - **`deepseek-flash` is self-hosted** (Parity vLLM pod → reverse SSH tunnel into the box, with
-  OpenRouter fallback) and ships as **three aliases**: `deepseek-flash` (pod + fallback),
+  OpenRouter fallback) and ships as **four aliases**: `deepseek-flash` (pod + fallback),
   `deepseek-flash-parity` (pod ONLY — no fallback, the hard prompts-stay-in-infra guarantee),
-  and `deepseek-flash-openrouter` (cloud only). Keep the two `hosted_vllm` entries in lockstep;
-  their per-entry parallel caps sum to the pod's ~32 knee (24 + 8). Moving parts span the box
+  `deepseek-flash-parity-v4-0731` (pod ONLY, version pinned in the name), and
+  `deepseek-flash-openrouter` (cloud only). Keep the three `hosted_vllm` entries in lockstep;
+  their per-entry parallel caps sum to the pod's ~32 knee (20 + 8 + 4). Moving parts span the box
   (tunnel account, sshd, ufw) and `config.yaml` — read RUNBOOK § I before changing any of it.
+- **The versioned alias hard-codes the pod's model version.** Whenever the pod is redeployed
+  with a new model, the same PR must add the matching `deepseek-flash-parity-<version>` alias
+  and update the model tables in `README.md` and the alias lists here and in `AGENTS.md` —
+  that name is the user-facing promise of exactly which model the pod serves.
 - After changing deploy/ops behavior, update `RUNBOOK.md` (and `README.md` if it's user-facing).
 - There is no automated test or lint step. "Verification" here means: YAML still parses, the SPDX
   header is present, no secret leaked, and `RUNBOOK.md`/`README.md` still match reality.
