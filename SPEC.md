@@ -9,8 +9,8 @@ alongside Kimi, logs full request/response bodies as a training corpus (see
 `docs/specs/2026-07-22-request-logging-design.md`), auto-deploys merged PRs via GitHub Actions
 (`RUNBOOK.md` § H), and serves `deepseek-flash` from **Parity's own vLLM GPU pod** through a
 reverse SSH tunnel with automatic OpenRouter fallback — plus pinned-routing variants
-`deepseek-flash-parity` (pod only) and `deepseek-flash-openrouter` (cloud only) (`RUNBOOK.md`
-§ I). This document captures
+`deepseek-flash-parity` (pod only, also as version-pinned `deepseek-flash-parity-v4-0731`)
+and `deepseek-flash-openrouter` (cloud only) (`RUNBOOK.md` § I). This document captures
 the original design; `README.md` and `RUNBOOK.md` are the current, authoritative references.
 
 ---

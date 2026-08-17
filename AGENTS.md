@@ -48,7 +48,7 @@ changes accordingly.
   *overrides* the real cost. Pins belong in exactly two cases: a provider that returns no
   per-call cost (Kimi/Moonshot — pin models too new for LiteLLM's auto-fetched price map, and
   remove the pin once the map catches up), and the deliberate budget-throttle pin on the
-  self-hosted `deepseek-flash` / `deepseek-flash-parity` entries (see the comments there).
+  three self-hosted `deepseek-flash*` pod entries (see the comments there).
 - **"Enable model X" requests are usually a no-op.** The `openrouter/*` wildcard in `config.yaml`
   already serves every OpenRouter model by its full ID (`openrouter/<org>/<model>`), with spend
   metered from OpenRouter's real per-call cost — no config change, no price pin, no deploy. Only
@@ -57,13 +57,21 @@ changes accordingly.
   temporary cost pin (Moonshot returns no per-call cost). Point teammates at README § "Models".
 - **`deepseek-flash` is special:** it's served by Parity's own vLLM GPU pod through a reverse SSH
   tunnel into the box, with automatic fallback to OpenRouter when the pod is down or saturated.
-  It ships as **three aliases** with different routing contracts: `deepseek-flash` (pod first,
+  It ships as **four aliases** with different routing contracts: `deepseek-flash` (pod first,
   OpenRouter fallback), `deepseek-flash-parity` (pod ONLY — no fallback, the hard
-  prompts-stay-in-infra guarantee; fails fast when the pod is down), and
-  `deepseek-flash-openrouter` (OpenRouter only). Keep the two `hosted_vllm` entries'
-  `litellm_params` in lockstep, and mind the parallel caps: they're per entry and sum to the
-  pod's ~32-parallel knee (24 + 8). Changes can involve the box (tunnel account, ufw) as well as
-  `config.yaml` — read `RUNBOOK.md` § I before touching any of it.
+  prompts-stay-in-infra guarantee; fails fast when the pod is down),
+  `deepseek-flash-parity-v4-0731` (pod ONLY like `-parity`, but the name pins exactly which
+  model version the pod serves), and `deepseek-flash-openrouter` (OpenRouter only). Keep the
+  three `hosted_vllm` entries' `litellm_params` in lockstep, and mind the parallel caps:
+  they're per entry and sum to the pod's ~32-parallel knee (20 + 8 + 4). Changes can involve
+  the box (tunnel account, ufw) as well as `config.yaml` — read `RUNBOOK.md` § I before
+  touching any of it.
+- **The versioned parity alias is a hard-coded promise.** `deepseek-flash-parity-<version>`
+  exists so users can pin (and verify) exactly which model the pod serves, while the unversioned
+  aliases float. Whenever the pod is redeployed with a new model version, the same PR must add
+  the matching new `deepseek-flash-parity-<version>` alias (retiring the old one once the old
+  model stops being served) and update the model tables in `README.md` and the alias lists in
+  `CLAUDE.md` and here.
 
 ## Repository layout
 
