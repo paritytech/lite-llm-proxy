@@ -89,6 +89,7 @@ changes accordingly.
 | `scripts/deploy-gatekeeper.sh` | Forced command pinning the CI SSH key to rsync + deploy only. |
 | `.github/workflows/validate.yml` | CI checks: YAML parses, shellcheck, SPDX, no secrets. |
 | `.github/workflows/deploy.yml` | Auto-deploy on merge to `main` (+ manual dispatch). |
+| `setup/` | Teammate-facing harness setup: one-command installer (`setup.sh`) + per-tool guides (`harnesses/`). |
 | `docs/specs/` | Dated design/review docs (request logging, privacy data flow, security review). |
 | `RUNBOOK.md` | Authoritative step-by-step: provision → deploy → key lifecycle → DNS cutover. |
 | `SPEC.md` | Original design and rationale (background). |
