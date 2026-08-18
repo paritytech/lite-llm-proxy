@@ -32,7 +32,7 @@ jobs:
           EOF
 
       - name: shellcheck scripts
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh setup/*.sh
 
       - name: python scripts compile
         run: python3 -m py_compile scripts/*.py

@@ -9,15 +9,20 @@ per-user virtual keys with individual budgets and usage tracking.
 - **Base URL:** `https://llm.substrate.dev`
 - **Auth:** your personal virtual key (`sk-...`), issued by the admin. Keep it secret; it carries your budget.
 
+> **Connect your coding harness (Claude Code, OpenCode, Codex, Pi, …) in ~5 minutes →
+> [`setup/`](setup/README.md)** — a one-command installer plus per-tool guides.
+
 This repository is the **deployment definition** for that service: the Docker Compose stack,
-reverse-proxy and proxy config, operational scripts, and runbook. No application source code and
-**no secrets** live here — the real `.env` exists only on the host.
+reverse-proxy and proxy config, operational scripts, runbook, and the teammate setup guides in
+`setup/`. No application source code and **no secrets** live here — the real `.env` exists only
+on the host.
 
 ---
 
 ## Contents
 
 - [For teammates — using the proxy](#for-teammates--using-the-proxy)
+  - [Harness setup guides](setup/README.md) (in `setup/`)
   - [Models](#models)
   - [From code (OpenAI SDK)](#from-code-openai-sdk)
   - [From the shell / CI](#from-the-shell--ci)
@@ -255,6 +260,7 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
 | `scripts/deploy-gatekeeper.sh` | SSH forced command pinning the CI deploy key to rsync + deploy only. |
 | `.github/workflows/validate.yml` | CI: YAML parses, shellcheck, SPDX headers, no secrets committed. |
 | `.github/workflows/deploy.yml` | Auto-deploys every merge to `main` to the box (manual trigger available). |
+| `setup/` | Teammate-facing harness setup: one-command installer (`setup.sh`) + per-tool guides (`harnesses/`). |
 | `RUNBOOK.md` | Step-by-step provisioning, deploy, key lifecycle, and DNS cutover. |
 | `SPEC.md` | The original design and rationale (background reference). |
 
