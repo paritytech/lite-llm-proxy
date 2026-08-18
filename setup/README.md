@@ -44,7 +44,7 @@ gh api repos/paritytech/lite-llm-proxy/contents/setup/setup.sh -H "Accept: appli
 git clone git@github.com:paritytech/lite-llm-proxy.git && ./lite-llm-proxy/setup/setup.sh
 ```
 
-Re-run the same command anytime to add more harnesses or change the model. To undo everything it wrote, append `-s -- cleanup` to a piped variant, or run `./setup.sh cleanup` from a clone.
+Re-run the same command anytime to add more harnesses or change the model. To undo everything it wrote, append `-s -- cleanup` to a piped variant, or run `./lite-llm-proxy/setup/setup.sh cleanup` from a clone.
 
 Or set up manually — primary four:
 

@@ -9,7 +9,7 @@ per-user virtual keys with individual budgets and usage tracking.
 - **Base URL:** `https://llm.substrate.dev`
 - **Auth:** your personal virtual key (`sk-...`), issued by the admin. Keep it secret; it carries your budget.
 
-> **Connect your coding harness (Claude Code, OpenCode, Codex, Cursor, …) in ~5 minutes →
+> **Connect your coding harness (Claude Code, OpenCode, Codex, Pi, …) in ~5 minutes →
 > [`setup/`](setup/README.md)** — a one-command installer plus per-tool guides.
 
 This repository is the **deployment definition** for that service: the Docker Compose stack,

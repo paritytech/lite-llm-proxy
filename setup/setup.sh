@@ -21,12 +21,14 @@
 
 set -euo pipefail
 
-RAW_URL="https://raw.githubusercontent.com/paritytech/lite-llm-proxy/main/setup/setup.sh"
-# How to invoke this script again (differs when running via `curl | bash`)
+# How to invoke this script again (differs when running via a pipe). Piped re-run
+# hints use gh because the repo is private — the raw.githubusercontent.com URL
+# 404s unless/until the repo goes public (see setup/README.md).
+GH_RAW_CMD='gh api repos/paritytech/lite-llm-proxy/contents/setup/setup.sh -H "Accept: application/vnd.github.raw"'
 if [ -f "${BASH_SOURCE[0]:-}" ]; then
   SELF="${BASH_SOURCE[0]}"
 else
-  SELF="curl -fsSL $RAW_URL | bash -s --"
+  SELF="$GH_RAW_CMD | bash -s --"
 fi
 
 DEFAULT_BASE="llm.substrate.dev"
@@ -333,7 +335,7 @@ Non-interactive flags (any missing value is prompted for):
   --harnesses claude-code,opencode,codex,pi,env  --yes
 Base URL defaults to https://llm.substrate.dev — pass --url to override.
 
-Works via curl too:  $SELF status
+Works piped (no checkout) too:  $GH_RAW_CMD | bash -s -- status
 EOF
       exit 0 ;;
     *) die "unknown argument: $1 (try --help)" ;;
