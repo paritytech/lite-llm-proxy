@@ -10,6 +10,8 @@
 export ANTHROPIC_BASE_URL="https://llm.substrate.dev"     # no /v1 — Claude Code appends /v1/messages itself
 export ANTHROPIC_AUTH_TOKEN="$LLM_PROXY_KEY"                # sent as "Authorization: Bearer ..."
 export ANTHROPIC_MODEL="<MODEL_NAME>"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="<MODEL_NAME>"          # pin all tiers: a saved /model default would otherwise send a claude-* name the proxy may not serve
+export ANTHROPIC_DEFAULT_SONNET_MODEL="<MODEL_NAME>"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="<MODEL_NAME>"         # background tasks would otherwise call a claude-haiku-* the proxy may not serve
 claude
 ```
