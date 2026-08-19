@@ -145,6 +145,10 @@ write_env_file() { # uses BASE KEY MODEL SEL_*
       printf 'export ANTHROPIC_BASE_URL="https://%s"\n' "$BASE"
       printf 'export ANTHROPIC_AUTH_TOKEN="$LLM_PROXY_KEY"\n'
       printf 'export ANTHROPIC_MODEL="%s"\n' "$MODEL"
+      # Pin every tier: a saved /model default (Opus/Sonnet) would otherwise
+      # send claude-* names the proxy doesn't serve.
+      printf 'export ANTHROPIC_DEFAULT_OPUS_MODEL="%s"\n' "$MODEL"
+      printf 'export ANTHROPIC_DEFAULT_SONNET_MODEL="%s"\n' "$MODEL"
       printf 'export ANTHROPIC_DEFAULT_HAIKU_MODEL="%s"\n' "$MODEL"
     fi
     if [ "$SEL_ENV" = "1" ]; then
@@ -387,6 +391,9 @@ case "$MODEL" in
   openrouter/*) ;;                  # already prefixed
   */*) MODEL="openrouter/$MODEL" ;; # pasted from openrouter.ai
 esac                                # no slash = proxy alias, leave as-is
+# A pasted API key would end up in env vars, the model picker, and server logs.
+case "$MODEL" in sk-*) die "'sk-...' looks like an API key, not a model id" ;; esac
+[ "$MODEL" != "$KEY" ] || die "the model equals the API key, paste a model id instead"
 
 # 4. Harnesses
 if [ -z "$HARNESSES" ]; then
