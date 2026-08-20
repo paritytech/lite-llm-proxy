@@ -425,7 +425,7 @@ case "$MODEL" in sk-*) die "'sk-...' looks like an API key, not a model id" ;; e
 # 4. Harnesses
 if [ -z "$HARNESSES" ]; then
   say "Which harnesses should be configured?"
-  say "  1. Claude Code   (env vars)"
+  say "  1. Claude Code   (parity-claude wrapper)"
   say "  2. OpenCode      (~/.config/opencode/opencode.json)"
   say "  3. Codex CLI     (~/.codex/config.toml)"
   say "  4. Pi            (~/.pi/agent/models.json)"
