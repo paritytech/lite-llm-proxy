@@ -2,7 +2,7 @@
 
 Connect your coding harness to the LLM proxy in ~5 minutes.
 
-The proxy lives at `https://llm.substrate.dev`. Snippets use one placeholder: `<MODEL_NAME>` — browse [openrouter.ai/models](https://openrouter.ai/models) and use the id with an `openrouter/` prefix, e.g. `openrouter/deepseek/deepseek-chat`.
+The proxy lives at `https://llm.substrate.dev`. Snippets use one placeholder: `<MODEL_NAME>` — a short alias from the [model menu](../README.md#models) (e.g. `claude-sonnet`, `kimi-k2`, `deepseek-flash`), or a full OpenRouter id prefixed with `openrouter/` (browse [openrouter.ai/models](https://openrouter.ai/models)), e.g. `openrouter/deepseek/deepseek-chat`.
 
 Don't set temperature/reasoning options in your harness config: the self-hosted models (`*-parity`) are preconfigured server-side for agentic workloads with max thinking. The `*-openrouter` variants don't carry those defaults, so the same model can behave slightly differently there.
 
@@ -24,18 +24,12 @@ curl https://llm.substrate.dev/v1/models -H "Authorization: Bearer $LLM_PROXY_KE
 
 ## 2. Configure your harness
 
-One command — asks for your key and model, then configures Claude Code, OpenCode, Codex, Pi, and generic `OPENAI_*` env vars. Run it whichever way you prefer:
+One command — asks for your key and model, then installs a `parity-claude` wrapper for Claude Code (plain `claude` stays on your own account) and configures OpenCode, Codex, Pi, and generic `OPENAI_*` env vars. Run it whichever way you prefer:
 
-**curl** (needs the repo to be public or a token — while it's private, use one of the other two):
+**curl:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/paritytech/lite-llm-proxy/main/setup/setup.sh | bash
-```
-
-**GitHub CLI** (works today for anyone with access to this repo):
-
-```bash
-gh api repos/paritytech/lite-llm-proxy/contents/setup/setup.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
 **From a clone:**
@@ -44,7 +38,7 @@ gh api repos/paritytech/lite-llm-proxy/contents/setup/setup.sh -H "Accept: appli
 git clone git@github.com:paritytech/lite-llm-proxy.git && ./lite-llm-proxy/setup/setup.sh
 ```
 
-Re-run the same command anytime to add more harnesses or change the model. To undo everything it wrote, append `-s -- cleanup` to a piped variant, or run `./lite-llm-proxy/setup/setup.sh cleanup` from a clone.
+Re-run the same command anytime to add more harnesses or change the model. To undo everything it wrote, append `-s -- cleanup` to the curl variant, or run `./lite-llm-proxy/setup/setup.sh cleanup` from a clone.
 
 Or set up manually — primary four:
 
@@ -76,7 +70,9 @@ All others:
 | avante.nvim | Neovim | ✅ | [avante-nvim.md](harnesses/avante-nvim.md) |
 | codecompanion.nvim | Neovim | ✅ | [codecompanion-nvim.md](harnesses/codecompanion-nvim.md) |
 | gptel | Emacs | ✅ | [gptel.md](harnesses/gptel.md) |
-| Gemini CLI, Amp, Windsurf, Void | — | ❌ | [not-supported.md](harnesses/not-supported.md) |
+| Gemini CLI, Amp, Windsurf, Void | — | ❌¹ | [not-supported.md](harnesses/not-supported.md) |
+
+¹ Void actually works via its OpenAI-compatible provider, but the project was archived in June 2026 — see [not-supported.md](harnesses/not-supported.md); prefer [Zed](harnesses/zed.md).
 
 Using something not listed? Most tools accept the generic OpenAI convention:
 
