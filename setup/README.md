@@ -26,16 +26,10 @@ curl https://llm.substrate.dev/v1/models -H "Authorization: Bearer $LLM_PROXY_KE
 
 One command — asks for your key and model, then installs a `parity-claude` wrapper for Claude Code (plain `claude` stays on your own account) and configures OpenCode, Codex, Pi, and generic `OPENAI_*` env vars. Run it whichever way you prefer:
 
-**curl** (needs the repo to be public or a token — while it's private, use one of the other two):
+**curl:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/paritytech/lite-llm-proxy/main/setup/setup.sh | bash
-```
-
-**GitHub CLI** (works today for anyone with access to this repo):
-
-```bash
-gh api repos/paritytech/lite-llm-proxy/contents/setup/setup.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
 **From a clone:**
@@ -44,7 +38,7 @@ gh api repos/paritytech/lite-llm-proxy/contents/setup/setup.sh -H "Accept: appli
 git clone git@github.com:paritytech/lite-llm-proxy.git && ./lite-llm-proxy/setup/setup.sh
 ```
 
-Re-run the same command anytime to add more harnesses or change the model. To undo everything it wrote, append `-s -- cleanup` to a piped variant, or run `./lite-llm-proxy/setup/setup.sh cleanup` from a clone.
+Re-run the same command anytime to add more harnesses or change the model. To undo everything it wrote, append `-s -- cleanup` to the curl variant, or run `./lite-llm-proxy/setup/setup.sh cleanup` from a clone.
 
 Or set up manually — primary four:
 

@@ -21,14 +21,12 @@
 
 set -euo pipefail
 
-# How to invoke this script again (differs when running via a pipe). Piped re-run
-# hints use gh because the repo is private — the raw.githubusercontent.com URL
-# 404s unless/until the repo goes public (see setup/README.md).
-GH_RAW_CMD='gh api repos/paritytech/lite-llm-proxy/contents/setup/setup.sh -H "Accept: application/vnd.github.raw"'
+# How to invoke this script again (differs when running via a pipe).
+RAW_URL='https://raw.githubusercontent.com/paritytech/lite-llm-proxy/main/setup/setup.sh'
 if [ -f "${BASH_SOURCE[0]:-}" ]; then
   SELF="${BASH_SOURCE[0]}"
 else
-  SELF="$GH_RAW_CMD | bash -s --"
+  SELF="curl -fsSL $RAW_URL | bash -s --"
 fi
 
 DEFAULT_BASE="llm.substrate.dev"
