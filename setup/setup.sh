@@ -168,6 +168,7 @@ write_claude_wrapper() { # uses BASE MODEL
     printf 'export ANTHROPIC_DEFAULT_OPUS_MODEL="%s"\n' "$MODEL"
     printf 'export ANTHROPIC_DEFAULT_SONNET_MODEL="%s"\n' "$MODEL"
     printf 'export ANTHROPIC_DEFAULT_HAIKU_MODEL="%s"\n' "$MODEL"
+    printf 'export ANTHROPIC_DEFAULT_FABLE_MODEL="%s"\n' "$MODEL"
     printf 'command -v claude >/dev/null || { echo "claude not installed: npm install -g @anthropic-ai/claude-code" >&2; exit 127; }\n'
     printf 'exec claude "$@"\n'
   } > "$WRAPPER"
