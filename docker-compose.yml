@@ -79,6 +79,12 @@ services:
       # race is real, and ENABLE_SIGNUP=false would NOT close it — upstream
       # exempts the first admin from that gate).
       DEFAULT_USER_ROLE: pending
+      # Keep signup OPEN — explicitly. Upstream auto-disables signup the moment
+      # the first admin account is created (observed live 2026-09-03; the
+      # v0.11.3 source comments on this auto-disable), which would silently
+      # break our access model: open signup → lands "pending" → admin approves.
+      # The pending role is the gate here, not closed signup.
+      ENABLE_SIGNUP: "true"
       # The UI admin canNOT read users' chat histories (upstream default allows
       # it). Proxy-side request logging (README "Logging & privacy") is the one,
       # documented visibility surface — don't grow a second, undocumented one.
