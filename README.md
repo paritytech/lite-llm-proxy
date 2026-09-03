@@ -8,6 +8,9 @@ per-user virtual keys with individual budgets and usage tracking.
 
 - **Base URL:** `https://llm.substrate.dev`
 - **Auth:** your personal virtual key (`sk-...`), issued by the admin. Keep it secret; it carries your budget.
+- **Chat in the browser:** `llm.substrate.dev/chat` — a hosted [chat UI](#chat-ui-open-webui);
+  sign up, get approved, chat. No key required to start. (That address is a shortcut that
+  redirects to the real home, `https://llm.substrate.dev:8443`.)
 
 > **Connect your coding harness (Claude Code, OpenCode, Codex, Pi, …) in ~5 minutes →
 > [`setup/`](setup/README.md)** — a one-command installer plus per-tool guides.
@@ -24,6 +27,7 @@ on the host.
 - [For teammates — using the proxy](#for-teammates--using-the-proxy)
   - [Harness setup guides](setup/README.md) (in `setup/`)
   - [Models](#models)
+  - [Chat UI (Open WebUI)](#chat-ui-open-webui)
   - [From code (OpenAI SDK)](#from-code-openai-sdk)
   - [From the shell / CI](#from-the-shell--ci)
   - [Budgets & limits](#budgets--limits)
@@ -126,6 +130,34 @@ infrastructure, while anything served by OpenRouter follows the normal cloud pat
 the default alias's fallback *can* send your prompt to OpenRouter — if that must never happen,
 use `deepseek-flash-parity` and be prepared to handle an error while the pod is down.
 
+### Chat UI (Open WebUI)
+
+Prefer a browser over an SDK or harness? The proxy has a hosted
+[Open WebUI](https://github.com/open-webui/open-webui) chat frontend. Just type
+**`llm.substrate.dev/chat`** — it redirects to the UI's real home,
+`https://llm.substrate.dev:8443` (same host as the API, alternate port; no separate domain to
+remember):
+
+- **Sign up** with your work email. New accounts start as *pending* — ping the admin to be
+  approved (one-time).
+- Once approved, chat away: the default model menu rides a **shared, budget-capped key** — a
+  fair-use pool for casual use. If the pool's monthly budget runs dry, the default models pause
+  for everyone until it resets.
+- **Want your own budget instead?** Add your personal proxy key: **Settings → Connections →
+  + Add Connection**, URL `https://llm.substrate.dev/v1`, key `sk-YOUR-KEY`. Its models join
+  your model picker, and spend lands on *your* budget exactly like API usage. This "direct
+  connection" goes straight from your browser to the proxy — your key stays in your browser,
+  never on the chat server.
+- **Logging:** chats reach the models through this same proxy, so [Logging &
+  privacy](#logging--privacy) applies in full — prompts and responses are logged to the
+  training corpus, whether you use the shared pool or your own key. The per-request
+  `"no-log"` flag isn't settable from the chat UI; if you need an always-opt-out key, ask
+  the admin. (The chat *server's* admin panel cannot read your conversations — admin chat
+  access is disabled; the proxy-side logging above is the one visibility surface.)
+- **On a strict network?** Some corporate/guest Wi-Fi blocks outbound ports beyond 80/443 —
+  if `:8443` won't load there, it's the network, not an outage. Use a different network or
+  the API.
+
 ### From code (OpenAI SDK)
 
 ```python
@@ -217,21 +249,31 @@ stays in the 90-day admin store; only a salted hash of it reaches the archive).
 
 ### Architecture
 
-One `docker compose` stack. Three always-on containers on a private Docker network; only Caddy
+One `docker compose` stack. Four always-on containers on a private Docker network; only Caddy
 publishes host ports. (Two more — the Presidio PII-scrub pair — sit behind the `scrub` compose
 profile, started by the nightly export for a few minutes and bound to localhost only.)
 
 ```
-internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
-                     (TLS)      (proxy)          (keys / budgets / usage / logs)
-                                   │
-                                   └──> 172.17.0.1:18000 ←─(reverse SSH tunnel)── vLLM GPU pod
-                                        (host, container-reachable only)          (deepseek-flash, -parity)
+internet ──443/80──> caddy ──┬──> litellm:4000 ──> postgres:5432
+         └──8443──── (TLS)   │     (proxy)          (keys / budgets / usage / logs)
+                             │        │
+                             │        └──> 172.17.0.1:18000 ←─(reverse SSH tunnel)── vLLM GPU pod
+                             │             (host, container-reachable only)          (deepseek-flash, -parity)
+                             └──> openwebui:8080 ──> litellm:4000
+                                   (chat UI, :8443)   (shared budget-capped key)
 ```
 
-- **caddy** — reverse proxy + automatic Let's Encrypt TLS. The only container exposing ports (80, 443).
+- **caddy** — reverse proxy + automatic Let's Encrypt TLS. The only container exposing ports (80, 443, 8443).
 - **litellm** — the proxy itself, on a **pinned image tag** (never `latest` — LiteLLM ships breaking
   changes). Listens on 4000 on the internal network only.
+- **openwebui** — the hosted chat frontend at `https://llm.substrate.dev:8443` (pinned image tag,
+  like litellm). Same hostname as the API on an alternate TLS port — deliberate: creating a new
+  DNS label needs an external grant, a port doesn't (and Open WebUI can't be served under a
+  path — see the `Caddyfile` comment). Talks to LiteLLM over the internal network with a shared
+  budget-capped virtual key;
+  users' personal "direct connections" go browser → `llm.substrate.dev` and never touch this
+  container. Accounts and chat history live in its own named volume (`openwebui_data`) — **not**
+  covered by the nightly Postgres dump (see `RUNBOOK.md` § J).
 - **postgres** — virtual keys, budgets, per-key spend, request logs. Persisted in a named volume,
   never published to the host.
 - **vLLM GPU pod** (not part of the compose stack) — Parity's self-hosted backend for
@@ -248,8 +290,8 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | The three-container stack (caddy + litellm + postgres). |
-| `Caddyfile` | TLS + reverse-proxy config. The site label is the public hostname. |
+| `docker-compose.yml` | The four-container stack (caddy + litellm + openwebui + postgres). |
+| `Caddyfile` | TLS + reverse-proxy config. Site labels = the public URLs (API + chat UI). |
 | `config.yaml` | LiteLLM model list (Kimi + OpenRouter aliases + wildcard) and settings. |
 | `.env.example` | Template for the real `.env` (secrets) that lives only on the host. |
 | `scripts/backup.sh` | Nightly `pg_dump` of the LiteLLM database, verified and pruned. |
@@ -270,7 +312,7 @@ internet ──443/80──> caddy ──> litellm:4000 ──> postgres:5432
 
 1. The host runs the stack from `/opt/team-llm`; the repo is rsync'd there (excluding `.env`).
 2. Secrets are generated and written to `/opt/team-llm/.env` (chmod 600) — **never committed**.
-3. `docker compose up -d` brings up Caddy (which auto-issues the Let's Encrypt cert), LiteLLM, and Postgres.
+3. `docker compose up -d` brings up Caddy (which auto-issues the Let's Encrypt certs), LiteLLM, Open WebUI, and Postgres.
 4. Nightly crons run the backup and price-map refresh.
 
 **Merging a PR to `main` deploys it.** GitHub Actions (`deploy.yml`) rsyncs the repo to the box
@@ -290,6 +332,9 @@ To change models or settings: edit `config.yaml`, open a PR, merge — CI does t
 - **Usage:** `GET /key/info?key=...` or the UI.
 - **Request logs:** the UI's **Logs** page shows per-request drill-down, including full
   prompt/response bodies (last ~90 days).
+- **Chat UI users:** approve pending signups in Open WebUI's own admin panel
+  (`https://llm.substrate.dev:8443` → Admin Panel → Users; the first-ever account is the admin).
+  Shared-key minting, budget, and per-user attribution checks: `RUNBOOK.md` § J.
 
 See `RUNBOOK.md` § D for the full mint → use → track → revoke walkthrough.
 
@@ -363,10 +408,19 @@ request ──> litellm ──> Postgres LiteLLM_SpendLogs   (hot store: ATTRIBU
 ## Security model
 
 - **No secrets in this repo.** The real `.env` (master key, salt key, Postgres password, upstream
-  Moonshot and OpenRouter keys) lives only on the host, chmod 600, and is git-ignored.
+  Moonshot and OpenRouter keys, the chat UI's shared key) lives only on the host, chmod 600, and
+  is git-ignored.
 - **Upstream keys never leave the server.** Teammates only ever hold their own scoped virtual keys.
-- **Network:** only ports 22/80/443 are open to the internet (`ufw`). LiteLLM (4000) and Postgres
-  (5432) stay on the internal Docker network. The vLLM tunnel port (18000) binds to the docker0
+- **The chat UI container is least-privilege.** It receives exactly one secret — the shared,
+  budget-capped virtual key — never the master key or upstream provider keys (no `env_file`; an
+  explicit allowlist of variables). Personal keys added as "direct connections" stay in the
+  user's browser and go straight to the proxy.
+- **Network:** the internet reaches exactly ports 22 (host sshd, gated by `ufw`) and 80/443/8443
+  (published by the Caddy container; 8443 is the chat UI, TLS like 443). For the published
+  ports, what governs exposure is compose's `ports:` section — Docker's nat rules act before
+  `ufw`'s INPUT chain, so the matching `ufw allow` rules are defense-in-depth, not the gate.
+  LiteLLM (4000), Open WebUI (8080), and Postgres (5432) are *not published* and stay
+  unreachable on the internal Docker network. The vLLM tunnel port (18000) binds to the docker0
   gateway address only — an internal ufw rule lets containers reach it; nothing external can.
 - **The vLLM pod's SSH access is caged.** The pod logs in as `vllm-tunnel`: no shell (`nologin`),
   `restrict,port-forwarding` in `authorized_keys`, and an sshd `Match` block that allows exactly

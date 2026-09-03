@@ -9,7 +9,7 @@ adds Claude-specific notes and repeats the rules that must never be missed.
 ## The repo in one line
 
 Deployment definition for the **Team LLM Proxy** — a self-hosted LiteLLM gateway (Docker Compose:
-Caddy + LiteLLM + Postgres) giving Parity teammates budgeted access to Kimi and OpenRouter models,
+Caddy + LiteLLM + Open WebUI + Postgres) giving Parity teammates budgeted access to Kimi and OpenRouter models,
 plus `deepseek-flash` served by Parity's own vLLM GPU pod via a reverse SSH tunnel (RUNBOOK § I).
 It drives a **live production service** at `https://llm.substrate.dev`. No app source, no build, no
 test suite — it's config, scripts, and docs.
@@ -18,7 +18,7 @@ test suite — it's config, scripts, and docs.
 
 1. **Never commit secrets.** Real keys live only in the host's `.env` (git-ignored). Only
    `.env.example` with `REPLACE_*` placeholders is tracked.
-2. **Keep the LiteLLM image tag pinned** in `docker-compose.yml` — never `latest`.
+2. **Keep image tags pinned** (`litellm`, `openwebui`) in `docker-compose.yml` — never `latest`.
 3. **Never rotate `LITELLM_SALT_KEY`** after launch — it invalidates DB-stored provider keys.
    Same for **`LOG_EXPORT_SESSION_SALT`** — rotating it unlinks corpus sessions spanning the
    rotation date.
