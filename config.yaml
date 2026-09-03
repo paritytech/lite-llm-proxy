@@ -213,6 +213,20 @@ general_settings:
   maximum_spend_logs_retention_period: "90d"
   maximum_spend_logs_retention_interval: "1d"
 
+  # ---- Open WebUI per-user attribution (chat UI, llm.substrate.dev:8443) ----
+  # The hosted chat UI (docker-compose.yml `openwebui`) calls this proxy with ONE
+  # shared budget-capped key, so key-level spend can't tell its users apart. Open
+  # WebUI stamps every request with the signed-in user (X-OpenWebUI-User-* headers,
+  # ENABLE_FORWARD_USER_INFO_HEADERS) — map the email onto LiteLLM's end-user
+  # ("customer") field so per-person usage shows in /ui → Usage → Customer. Email
+  # over user-id: it's the stable, human-readable identifier (display names are
+  # user-editable). Known upstream flake: BerriAI/litellm#14667 reports this mapping
+  # not firing on some versions — the spend TAGS in litellm_settings below are the
+  # reliable fallback; verify both at rollout (RUNBOOK § J step 4).
+  user_header_mappings:
+    - header_name: X-OpenWebUI-User-Email
+      litellm_user_role: customer
+
 litellm_settings:
   # Silently drop unsupported OpenAI params instead of erroring (eases tool compatibility).
   drop_params: true
@@ -226,3 +240,16 @@ litellm_settings:
   # model_list comments).
   fallbacks:
     - deepseek-flash: ["openrouter/deepseek/deepseek-v4-flash-0731"]
+
+  # Copy Open WebUI's user headers onto each request's spend tags — belt-and-braces
+  # per-user attribution on the chat UI's shared key, independent of the
+  # user_header_mappings in general_settings (see the comment there). Visible in
+  # /ui → Logs, i.e. the attributed 90-day hot store ONLY: the nightly corpus
+  # export DELIBERATELY drops request_tags (identity-column whitelist in
+  # scripts/export-logs.sh) — do NOT "fix" the export to include them; that would
+  # leak user identities into the forever-corpus. Harmless on non-chat traffic:
+  # absent headers add no tags. And informational only: any API keyholder can set
+  # these headers on their own calls.
+  extra_spend_tag_headers:
+    - "x-openwebui-user-email"
+    - "x-openwebui-user-id"

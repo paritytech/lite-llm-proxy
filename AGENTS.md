@@ -8,24 +8,27 @@ repository. Human contributors should read it too — it documents the non-obvio
 The **deployment definition** for the Team LLM Proxy: a self-hosted [LiteLLM](https://docs.litellm.ai)
 gateway that gives Parity teammates budgeted, per-user access to Kimi (Moonshot AI) and OpenRouter
 models — plus `deepseek-flash`, served by **Parity's own vLLM GPU pod** over a reverse SSH tunnel
-(`RUNBOOK.md` § I) — behind one OpenAI-compatible HTTPS API. It is a small ops repo — Docker
-Compose, a Caddyfile, a LiteLLM `config.yaml`, a handful of scripts, and docs. **There is no
-application source code to build or test.** See `README.md` for the overview and `RUNBOOK.md` for
-operations.
+(`RUNBOOK.md` § I) — behind one OpenAI-compatible HTTPS API, with a hosted **Open WebUI chat
+frontend** on top (`RUNBOOK.md` § J). It is a small ops repo — Docker Compose, a Caddyfile, a
+LiteLLM `config.yaml`, a handful of scripts, and docs. **There is no application source code to
+build or test.** See `README.md` for the overview and `RUNBOOK.md` for operations.
 
-This config drives a **live, shared production service** at `https://llm.substrate.dev`. Treat
-changes accordingly.
+This config drives a **live, shared production service** at `https://llm.substrate.dev` (chat UI:
+`https://llm.substrate.dev:8443`). Treat changes accordingly.
 
 ## Golden rules
 
 1. **Never commit secrets.** No real keys, passwords, or tokens in any tracked file. The real `.env`
    lives only on the host (chmod 600) and is git-ignored. Only `.env.example` (placeholders) is
    tracked. If you add a new secret, add it to `.env.example` with a `REPLACE_*` placeholder — never
-   a real value.
-2. **Keep the LiteLLM image tag pinned.** In `docker-compose.yml` the `litellm` image is a pinned
-   version (e.g. `:v1.95.0`), never `latest`/`main-latest` — LiteLLM ships breaking changes. To
-   upgrade, bump the tag deliberately, note it, and re-run the streaming-cost spot-check
-   (`RUNBOOK.md` § "Pricing model").
+   a real value. (Exception: a secret the stack must deploy WITHOUT may be a deliberately empty
+   value instead of `REPLACE_*`, so provisioning's "no placeholders left" check stays meaningful —
+   see `OPENWEBUI_SHARED_KEY`.)
+2. **Keep image tags pinned.** In `docker-compose.yml` the `litellm` and `openwebui` images are
+   pinned versions (e.g. `:v1.95.0`), never `latest`/`main-latest` — both ship breaking changes.
+   To upgrade LiteLLM, bump the tag deliberately, note it, and re-run the streaming-cost
+   spot-check (`RUNBOOK.md` § "Pricing model"); for Open WebUI, read the release notes
+   (`RUNBOOK.md` § J ops notes).
 3. **Never rotate `LITELLM_SALT_KEY` after launch.** It encrypts provider keys stored in Postgres;
    rotating it invalidates them.
 4. **Don't run commands against the live host or push to GitHub on the user's behalf** unless they
@@ -40,8 +43,12 @@ changes accordingly.
 - **Comments:** the existing files are heavily and deliberately commented — comments explain *why*
   (e.g. why a price is pinned, why a port isn't published). Match that density; keep the rationale
   when you edit a line it explains.
-- **Hostname** lives in exactly one place: the site label in `Caddyfile`. Changing the public URL is
-  a one-line edit there plus a Caddy reload (see `RUNBOOK.md` § F).
+- **Public URLs** live in exactly one place: the site labels in `Caddyfile` (`llm.substrate.dev`
+  = API, `llm.substrate.dev:8443` = Open WebUI chat — same hostname on purpose: new DNS labels
+  need an external grant, ports don't; the typeable `llm.substrate.dev/chat` is an exact-path
+  redirect to `:8443`, safely distinct from the API's `/chat/completions`). Changing a public
+  URL is a one-line edit there plus a Caddy reload (see `RUNBOOK.md` § F) — plus, for the chat
+  UI, the matching `WEBUI_URL` in `docker-compose.yml` (and ufw if the port changes).
 - **Models & pricing** live in `config.yaml`. OpenRouter returns the real per-call cost and
   LiteLLM records it directly, streamed calls included (verified on-box 2026-08-12) — so
   **OpenRouter entries must stay pin-free**: a hardcoded `input_/output_cost_per_token` pin
@@ -77,8 +84,8 @@ changes accordingly.
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | caddy + litellm + postgres stack. Only caddy publishes host ports. |
-| `Caddyfile` | TLS + reverse proxy. Site label = public hostname. |
+| `docker-compose.yml` | caddy + litellm + openwebui + postgres stack. Only caddy publishes host ports. |
+| `Caddyfile` | TLS + reverse proxy. Site labels = public hostnames (API + chat UI). |
 | `config.yaml` | LiteLLM model list (Kimi + OpenRouter aliases + `openrouter/*` wildcard) + settings. |
 | `.env.example` | Secrets template. Real `.env` is host-only, git-ignored. |
 | `scripts/backup.sh` | Nightly verified `pg_dump`, pruned after 14 days. |
@@ -114,7 +121,7 @@ changes accordingly.
 - [ ] Added a setting that needs a secret? Add a placeholder to `.env.example`.
 - [ ] New file? Add the SPDX header.
 - [ ] Changed deploy/ops behavior? Update `RUNBOOK.md` (and `README.md` if user-facing).
-- [ ] Bumped the LiteLLM tag? Confirm it's a real, stable release and note the date.
+- [ ] Bumped the LiteLLM or Open WebUI tag? Confirm it's a real, stable release and note the date.
 
 ## License headers
 

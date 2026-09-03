@@ -6,6 +6,26 @@
 }
 
 llm.substrate.dev {
+	# Typeable entry to the chat UI: EXACT paths /chat and /chat/ only, so the
+	# API route POST /chat/completions (used by SDK clients hitting the root —
+	# see README "From code") is untouched. Caddy orders redir before
+	# reverse_proxy, and a path matcher without * is exact-match. {host} (the
+	# request's hostname, port stripped) keeps the site label above the single
+	# source of the public hostname (RUNBOOK § F).
+	redir /chat https://{host}:8443
+	redir /chat/ https://{host}:8443
 	reverse_proxy litellm:4000
+	encode zstd gzip
+}
+
+# Hosted chat UI (Open WebUI) — same hostname, alternate TLS port, so NO new DNS
+# record is needed (deliberate: nobody grants us records — see RUNBOOK § J). Caddy
+# reuses the cert it already manages for this name. Open WebUI can't live under a
+# path like /chat instead: it doesn't support subpath serving (upstream PR #12002
+# closed unmerged), and /chat* would shadow LiteLLM's root /chat/completions route
+# that SDK clients use. Port 8443 must be open in ufw (RUNBOOK § A / § J step 1)
+# and published by the caddy service in docker-compose.yml.
+llm.substrate.dev:8443 {
+	reverse_proxy openwebui:8080
 	encode zstd gzip
 }

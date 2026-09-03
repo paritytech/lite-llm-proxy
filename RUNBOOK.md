@@ -16,7 +16,7 @@ Notes:
 
 ```bash
 lsb_release -ds
-ss -tlnp | grep -E ":(80|443) " || echo "80/443 free"
+ss -tlnp | grep -E ":(80|443|8443) " || echo "80/443/8443 free"
 command -v docker || echo "docker not installed"
 ```
 ```bash
@@ -39,10 +39,15 @@ exit            # then: ssh <box>   (reconnect so the group is active)
 docker ps
 ```
 ```bash
-# Firewall: allow SSH first, then 80/443, then enable (run one at a time)
+# Firewall: allow SSH first, then 80/443 (API + certs) and 8443 (chat UI, § J),
+# then enable (run one at a time). NOTE: for the Docker-PUBLISHED ports (80/443/8443)
+# ufw is defense-in-depth only — Docker's nat rules act before ufw's INPUT chain, so
+# what really gates container exposure is compose's `ports:` section. ufw genuinely
+# gates host services (22).
 sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
+sudo ufw allow 8443/tcp
 sudo ufw --force enable
 sudo ufw status verbose
 ```
@@ -240,10 +245,12 @@ dig +short <assigned-host>.substrate.dev A      # -> <BOX_IPV4>
 dig +short <assigned-host>.substrate.dev AAAA   # -> <BOX_IPV6>
 ```
 ```bash
-# 2. [laptop] Edit Caddyfile in the repo: change the one site-label line
-#       llm.substrate.dev  ->  <assigned-host>.substrate.dev
-#    then copy it to the box:
-rsync -av <local-repo>/Caddyfile <box>:/opt/team-llm/Caddyfile
+# 2. [laptop] Edit the repo: change BOTH site labels in Caddyfile
+#       llm.substrate.dev       ->  <assigned-host>.substrate.dev
+#       llm.substrate.dev:8443  ->  <assigned-host>.substrate.dev:8443
+#    (the /chat redirect targets use the {host} placeholder and follow automatically)
+#    and the chat UI's WEBUI_URL in docker-compose.yml. Then copy both to the box:
+rsync -av <local-repo>/Caddyfile <local-repo>/docker-compose.yml <box>:/opt/team-llm/
 ```
 ```bash
 # 3. Reload (on box)
@@ -653,4 +660,112 @@ sudo pkill -u vllm-tunnel
 #   bridge subnet is ever customised, update sshd's PermitListen, the pod's -R
 #   bind address, AND the ufw rule from step 2b (host.docker.internal follows
 #   the daemon automatically).
+```
+
+---
+
+## J. Hosted chat UI (Open WebUI, https://llm.substrate.dev:8443)
+
+Browser chat over the same proxy: the `openwebui` service in `docker-compose.yml`, served by
+Caddy on the **same hostname at alternate TLS port 8443** — deliberately NOT a new subdomain
+(DNS records need an external DevOps grant; a port is ours to open) and NOT *served* under a
+path (Open WebUI can't run under a subpath — upstream PR #12002 closed unmerged — and `/chat*`
+proxying would shadow LiteLLM's root `/chat/completions` route that SDK clients depend on).
+The typeable address is the **exact-path redirect** `llm.substrate.dev/chat` → `:8443` in the
+Caddyfile, which coexists safely with `/chat/completions`. Access model (README "Chat UI" is
+the user-facing doc):
+
+- **Shared pool:** the UI's built-in connection uses ONE budget-capped virtual key
+  (`OPENWEBUI_SHARED_KEY` in `.env`) — anyone with an approved account chats without handling
+  a key. When its monthly budget is gone, the default models pause for everyone. Deliberate.
+- **Personal keys:** users add a Direct Connection (`https://llm.substrate.dev/v1` + own key)
+  in their UI settings — spend/budget/attribution behave exactly like API usage. That path is
+  **browser → proxy** and never touches the openwebui container.
+- **Config-as-code:** `ENABLE_PERSISTENT_CONFIG=false`, so the compose `environment:` block is
+  the single source of truth — settings flipped in Open WebUI's admin UI do NOT survive a
+  recreate. Change compose, PR, merge.
+
+```bash
+# 0. BEFORE merging the PR that adds the service — prep, because MERGE = DEPLOY = the
+#    chat UI is on the internet minutes later, and step 1's race starts then:
+#    a) Firewall (idempotent; in § A's firewall step for new boxes). NOTE this is
+#       defense-in-depth, NOT the exposure gate: Docker routes published-port traffic
+#       through its own nat chain BEFORE ufw's INPUT rules, so :8443 answers as soon as
+#       caddy is recreated regardless of ufw (docs.docker.com "Packet filtering and
+#       firewalls"). What actually governs exposure is which ports compose PUBLISHES.
+sudo ufw allow 8443/tcp
+#    b) Have step 1's signup command filled in and ready to paste (strong password,
+#       your work email), and be watching the deploy in the Actions tab.
+
+# 1. Claim the admin account THE MOMENT the deploy goes green. The FIRST account ever
+#    created is the Open WebUI admin — an internet stranger who signs up before you
+#    silently owns the chat UI (and, once the shared key is configured, can read it out
+#    of the admin settings). ENABLE_SIGNUP=false would NOT prevent this: upstream
+#    deliberately exempts the first admin from that gate. So don't leave a gap:
+curl -s https://llm.substrate.dev:8443/api/v1/auths/signup \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Admin","email":"<you>@parity.io","password":"<STRONG-PASSWORD>"}'
+#    Expect: JSON containing "role":"admin". IF IT SAYS "pending" INSTEAD, someone beat
+#    you to the account: stop, wipe the UI state and reclaim —
+#      docker compose rm -sf openwebui && docker volume rm team-llm_openwebui_data
+#      docker compose up -d openwebui   # then sign up again, immediately
+#    — and if OPENWEBUI_SHARED_KEY was already set in .env at that point, treat it as
+#    exposed: rotate it (mint new per step 2, /key/delete the old).
+
+# 2. Mint the shared key (budget-capped; the alias makes it findable in /ui). Do this
+#    AFTER the admin account is confirmed yours — the key is visible to the UI admin.
+#    max_budget is the monthly fair-use pool for ALL shared-connection chat; rpm_limit
+#    keeps one careless user (or a runaway tab) from draining it in minutes.
+curl -s https://llm.substrate.dev/key/generate \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' \
+  -d '{"key_alias":"openwebui-shared","max_budget":50,"budget_duration":"30d","rpm_limit":30}'
+#    Copy "key" from the response into /opt/team-llm/.env:
+#      OPENWEBUI_SHARED_KEY=sk-...
+#    then recreate the service so it picks the env up:
+docker compose up -d --force-recreate openwebui
+
+# 3. Approve users: later signups land as "pending" (DEFAULT_USER_ROLE) — approve them
+#    under Admin Panel → Users → role: user.
+
+# 4. Verify per-user attribution on the shared key: chat once as an approved user, then in
+#    https://llm.substrate.dev/ui → Logs open that request. Expect the openwebui user email
+#    in the request TAGS (litellm_settings.extra_spend_tag_headers — the reliable signal),
+#    and the same email under Usage → Customer (general_settings.user_header_mappings —
+#    best-effort: upstream flake BerriAI/litellm#14667; tags alone are acceptable).
+
+# 5. Verify the personal-key path (Direct Connections): in the chat UI as a normal user,
+#    Settings → Connections → + Add Connection → URL https://llm.substrate.dev/v1 + a real
+#    virtual key → its models appear in the picker and a chat completes. This path runs in
+#    the BROWSER, so if models never list, check CORS from the box:
+curl -is -X OPTIONS https://llm.substrate.dev/v1/models \
+  -H 'Origin: https://llm.substrate.dev:8443' -H 'Access-Control-Request-Method: GET' | head -15
+#    (the :8443 origin is DIFFERENT from the API's :443 origin — same-origin rules are
+#    scheme+host+port). Expect an Access-Control-Allow-Origin header. If it's missing, add
+#    CORS headers for the chat origin to the llm.substrate.dev site block in the Caddyfile
+#    (PR it).
+```
+
+```bash
+# Ops notes:
+# - Data: accounts + chat history live in the openwebui_data volume — NOT in the nightly
+#   pg_dump (scripts/backup.sh covers Postgres only). Chats are convenience state for now;
+#   if that ever changes, add the volume to the backup.
+# - Upgrades: bump the PINNED image tag in docker-compose.yml (read the release notes —
+#   Open WebUI moves fast), PR, merge; deploy.sh's `docker compose up -d` recreates only
+#   this service. Never `latest`.
+# - Shared key exhausted mid-month (users report "budget exceeded" on default models):
+#   either wait for the window reset, raise max_budget via /key/update, or tell users to
+#   add a personal key (README "Chat UI"). Raising the cap is a policy call, not an op.
+# - Rotating the shared key: mint a new one (step 2), swap .env, force-recreate openwebui.
+#   Old key: /key/delete. Sessions survive the recreate (the UI's signing secret is
+#   pinned into the data volume via WEBUI_SECRET_KEY_FILE in docker-compose.yml — without
+#   that, every recreate would log everyone out).
+# - Prompts from the chat UI hit the proxy like any API call → logged to the training
+#   corpus (§ G) under whichever key carried them (shared or personal). The README section
+#   tells users this explicitly; the per-request no-log flag is not settable from the UI.
+# - Corpus session grouping: Open WebUI sends no litellm_session_id, so each chat turn
+#   exports as a standalone one-turn session. Fine for training (the UI resends the full
+#   history every turn) — just don't be surprised the corpus doesn't thread them.
+# - Attribution headers (x-openwebui-user-*) can be SET BY ANY API KEYHOLDER on direct
+#   API calls too — treat the tags/customer fields as informational, not authoritative.
 ```

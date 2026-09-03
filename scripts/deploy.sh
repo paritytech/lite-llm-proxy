@@ -59,20 +59,35 @@ if changed Caddyfile; then
   fi
 fi
 
-# Health gate, restart or not: a deploy only "succeeds" if the service answers afterwards.
-# Hits the public URL from the box, so it exercises Caddy + TLS + LiteLLM, not a loopback
-# shortcut. LiteLLM cold-starts (prisma migrations) can take ~30 s after a recreate.
-echo "deploy: waiting for https://llm.substrate.dev/health/liveliness"
-for i in $(seq 1 12); do
-  if curl -fsS --max-time 10 https://llm.substrate.dev/health/liveliness > /dev/null; then
-    echo "deploy: healthy (attempt $i)"
-    sha256sum "${TRACKED[@]}" > "$STATE_FILE"
-    echo "deploy: done at $(date -u +%FT%TZ)"
-    exit 0
-  fi
-  sleep 5
-done
+# Health gate, restart or not: a deploy only "succeeds" if BOTH public endpoints answer
+# afterwards — the API and the chat UI (a green deploy with a dead chat UI would go
+# unnoticed otherwise). Hits the public URLs from the box, so it exercises Caddy + TLS +
+# the apps, not a loopback shortcut. LiteLLM cold-starts (prisma migrations) can take
+# ~30 s after a recreate; Open WebUI runs its own DB migrations on first boot, so its
+# gate gets a longer window.
+gate() {  # gate <name> <url> <attempts> — poll <url> every 5s; 0 as soon as it answers
+  local name=$1 url=$2 attempts=$3 i
+  echo "deploy: waiting for $url"
+  for i in $(seq 1 "$attempts"); do
+    if curl -fsS --max-time 10 "$url" > /dev/null; then
+      echo "deploy: $name healthy (attempt $i)"
+      return 0
+    fi
+    sleep 5
+  done
+  echo "deploy: FAILED — $name not healthy after $((attempts * 5))s; state file NOT updated" >&2
+  return 1
+}
 
-echo "deploy: FAILED — service not healthy after 60s; state file NOT updated" >&2
-echo "deploy: inspect with: docker compose ps; docker compose logs --tail=100 litellm caddy" >&2
-exit 1
+if ! gate "api" https://llm.substrate.dev/health/liveliness 12; then
+  echo "deploy: inspect with: docker compose ps; docker compose logs --tail=100 litellm caddy" >&2
+  exit 1
+fi
+if ! gate "chat-ui" https://llm.substrate.dev:8443/health 24; then
+  echo "deploy: inspect with: docker compose ps; docker compose logs --tail=100 openwebui caddy" >&2
+  exit 1
+fi
+
+sha256sum "${TRACKED[@]}" > "$STATE_FILE"
+echo "deploy: done at $(date -u +%FT%TZ)"
+exit 0

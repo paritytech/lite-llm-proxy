@@ -10,12 +10,16 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # Chat UI (Open WebUI) — same hostname on an alternate TLS port, because a
+      # new DNS label isn't ours to create (Caddyfile comment has the full story).
+      - "8443:8443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - litellm
+      - openwebui
     networks: [internal]
 
   litellm:
@@ -37,6 +41,68 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks: [internal]
+
+  # ---- Open WebUI (hosted chat frontend, https://llm.substrate.dev:8443) ----
+  # Browser chat over the same proxy (README "Chat UI"). Ships with ONE server-side
+  # connection to LiteLLM over the internal network, authed by a shared,
+  # budget-capped virtual key (OPENWEBUI_SHARED_KEY in .env — mint per RUNBOOK § J).
+  # Users who want their own budget add a personal Direct Connection to
+  # https://llm.substrate.dev/v1 with their own key instead (browser → proxy
+  # directly; this container never sees personal keys).
+  # Deliberately NO env_file: .env holds upstream provider secrets (Moonshot,
+  # OpenRouter, master key) that this container must never see — it gets exactly
+  # the variables below and nothing else.
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:v0.11.3   # PINNED — latest stable confirmed 2026-09-03
+    restart: unless-stopped
+    environment:
+      # Shared default connection: LiteLLM over the compose network. The key is
+      # the budget-capped "openwebui-shared" virtual key — NEVER the master key.
+      # Default-empty so a box whose .env predates this service still deploys
+      # cleanly (the default connection just stays dead until the key is added).
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${OPENWEBUI_SHARED_KEY:-}
+      # This deployment is OpenAI-API-only; don't probe for a local Ollama.
+      ENABLE_OLLAMA_API: "false"
+      # Stamp each proxied request with the signed-in user
+      # (X-OpenWebUI-User-Id/-Email/-Name/-Role) so LiteLLM can attribute
+      # shared-key spend per person — consumed in config.yaml
+      # (user_header_mappings + extra_spend_tag_headers).
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      # Let users add a personal connection (their own proxy key = their own
+      # budget) under Settings → Connections.
+      ENABLE_DIRECT_CONNECTIONS: "true"
+      # New signups land role-less ("pending", no access) until an admin approves
+      # them — that's the access gate. The FIRST account created becomes admin —
+      # claim it the moment the first deploy goes green (RUNBOOK § J step 1; the
+      # race is real, and ENABLE_SIGNUP=false would NOT close it — upstream
+      # exempts the first admin from that gate).
+      DEFAULT_USER_ROLE: pending
+      # The UI admin canNOT read users' chat histories (upstream default allows
+      # it). Proxy-side request logging (README "Logging & privacy") is the one,
+      # documented visibility surface — don't grow a second, undocumented one.
+      ENABLE_ADMIN_CHAT_ACCESS: "false"
+      # Pin the session-signing secret INTO the data volume. Upstream generates
+      # it at /app/backend/.webui_secret_key (outside the volume), so without
+      # this every recreate — image bump, key rotation — would regenerate it and
+      # log every user out.
+      WEBUI_SECRET_KEY_FILE: /app/backend/data/.webui_secret_key
+      # Keep env the single source of truth, matching this repo's config-as-code
+      # model: without this, Open WebUI copies env values into its DB on first
+      # boot and ignores env changes afterwards. Flip settings HERE, not in the
+      # admin UI — UI-made settings changes do not survive a recreate.
+      ENABLE_PERSISTENT_CONFIG: "false"
+      WEBUI_URL: https://llm.substrate.dev:8443
+    volumes:
+      # Accounts, chat history (SQLite), and the session-signing secret (pinned
+      # here by WEBUI_SECRET_KEY_FILE above). NOT covered by the nightly pg_dump
+      # — see the backup note in RUNBOOK § J.
+      - openwebui_data:/app/backend/data
+    expose:
+      - "8080"
+    depends_on:
+      - litellm
     networks: [internal]
 
   # ---- PII scrub pair (used only by scripts/export-logs.sh) ----
@@ -81,6 +147,7 @@ volumes:
   caddy_data:
   caddy_config:
   postgres_data:
+  openwebui_data:
 
 networks:
   internal:
