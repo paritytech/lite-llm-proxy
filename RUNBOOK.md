@@ -725,7 +725,9 @@ curl -s https://llm.substrate.dev/key/generate \
 docker compose up -d --force-recreate openwebui
 
 # 3. Approve users: later signups land as "pending" (DEFAULT_USER_ROLE) — approve them
-#    under Admin Panel → Users → role: user.
+#    under Admin Panel → Users → role: user. If the login page shows NO sign-up link,
+#    signup got turned off — upstream auto-disables it when the first admin is created —
+#    and compose's ENABLE_SIGNUP=true pin (plus a recreate) restores it.
 
 # 4. Verify per-user attribution on the shared key: chat once as an approved user, then in
 #    https://llm.substrate.dev/ui → Logs open that request. Expect the openwebui user email
