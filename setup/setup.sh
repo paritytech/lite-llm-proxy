@@ -264,7 +264,14 @@ write_claude_wrapper() { # uses BASE KEY MODEL
     printf 'export DISABLE_EXTRA_USAGE_COMMAND=1\n'
     printf 'export DISABLE_ERROR_REPORTING=1\n'
     printf 'command -v claude >/dev/null || { echo "claude not installed: npm install -g @anthropic-ai/claude-code" >&2; exit 127; }\n'
-    printf 'exec claude "$@"\n'
+    # A saved model literal in settings.json — isolated, real, or the
+    # project-level one under $PWD/.claude (which IS the real, shared file
+    # when launched from $HOME) — overrides the ANTHROPIC_DEFAULT_* pins
+    # above (hit live 2026-09-04: parity-claude launched from ~ picked up a
+    # stale real-account model despite CLAUDE_CONFIG_DIR isolation). A CLI
+    # --model flag outranks all of them, so pass it explicitly; `"$@"` comes
+    # after so a user's own `--model` (one-session override) still wins.
+    printf 'exec claude --model "%s" "$@"\n' "$MODEL"
   } > "$WRAPPER"
   chmod 755 "$WRAPPER"
   say "wrote     $WRAPPER"
