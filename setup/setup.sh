@@ -11,10 +11,10 @@
 #
 # Non-interactive flags (any missing value is prompted for):
 #   ./setup.sh --key sk-... --model deepseek/deepseek-chat \
-#              --harnesses claude-code,opencode,codex,pi,env --yes
+#              --harnesses claude-code,opencode,codex,pi,zed,oh-my-pi,env --yes
 # The base URL defaults to https://llm.substrate.dev; pass --url to override.
 #
-# Supported harnesses: claude-code, opencode, codex, pi,
+# Supported harnesses: claude-code, opencode, codex, pi, zed, oh-my-pi,
 # env (generic OPENAI_* vars — covers Aider, Qwen Code, and most other tools).
 # UI-configured harnesses (Cline, Copilot, JetBrains, ...) can't be scripted —
 # see harnesses/*.md for those.
@@ -127,6 +127,8 @@ cmd_cleanup() {
     esac
   done < "$MANIFEST"
   rm -rf "$LLM_DIR"
+  # Harmless no-op if write_zed never set it.
+  command -v launchctl >/dev/null 2>&1 && launchctl unsetenv PARITY_PROXY_API_KEY 2>/dev/null
   say "Done. Open a new shell for env changes to take effect."
 }
 
@@ -143,6 +145,16 @@ write_env_file() { # uses BASE KEY MODEL SEL_*
       printf 'export OPENAI_BASE_URL="https://%s/v1"\n' "$BASE"
       printf 'export OPENAI_API_BASE="https://%s/v1"\n' "$BASE"
       printf 'export OPENAI_API_KEY="$LLM_PROXY_KEY"\n'
+    fi
+    if [ "$SEL_ZED" = "1" ]; then
+      # Zed derives the key's env var from the provider id: parity-proxy -> PARITY_PROXY_API_KEY.
+      printf 'export PARITY_PROXY_API_KEY="$LLM_PROXY_KEY"\n'
+    fi
+    if [ "$SEL_OMP" = "1" ]; then
+      # oh-my-pi ships a native litellm provider: these two vars are the whole
+      # config, and it discovers the proxy's model list at runtime.
+      printf 'export LITELLM_API_KEY="$LLM_PROXY_KEY"\n'
+      printf 'export LITELLM_BASE_URL="https://%s/v1"\n' "$BASE"
     fi
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
@@ -216,16 +228,41 @@ py_merge() { # <file> <python-code> — merge JSON via python3; caller checked e
   LLM_FILE="$1" LLM_BASE="$BASE" LLM_KEY="$KEY" LLM_MODEL="$MODEL" python3 -c "$2"
 }
 
+py_merge_safe() { # <file> <python-code> — merge JSON into <file> via python3.
+  # backup_file only runs, and <file> only changes, once the merge has
+  # actually succeeded: merges into a scratch copy first, so a parse/read
+  # failure of any kind (bad JSON, unreadable, wrong encoding — the caller's
+  # python catches broadly and exits nonzero) leaves <file> byte-for-byte
+  # untouched and takes no backup. Writes through `cat >`, not `mv`, so a
+  # <file> that's a symlink (e.g. dotfiles-managed) keeps pointing at its
+  # real target instead of being replaced by a plain file. (A RETURN trap
+  # was tried here for scratch-file cleanup on interrupt; bash tears down
+  # `local tmp` before that trap fires, and RETURN doesn't fire on a real
+  # signal anyway — explicit rm -f at each exit is what actually works.)
+  local f="$1" tmp
+  tmp="$(mktemp "$f.XXXXXX")"
+  cp "$f" "$tmp" || { rm -f "$tmp"; return 1; }
+  if ! py_merge "$tmp" "$2"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  backup_file "$f"
+  cat "$tmp" > "$f"
+  rm -f "$tmp"
+}
+
 write_opencode() {
   local f="$HOME/.config/opencode/opencode.json"
-  backup_file "$f"
   mkdir -p "$(dirname "$f")"
   if [ -f "$f" ]; then
     command -v python3 >/dev/null 2>&1 || { warn "opencode.json exists and python3 is missing — merge manually (see harnesses/opencode.md)"; return 0; }
-    py_merge "$f" '
-import json, os
+    py_merge_safe "$f" '
+import json, os, sys
 p = os.environ["LLM_FILE"]
-cfg = json.load(open(p))
+try:
+    cfg = json.load(open(p))
+except Exception:
+    sys.exit(3)
 cfg.setdefault("provider", {})["parity-proxy"] = {
     "npm": "@ai-sdk/openai-compatible",
     "name": "Parity LLM Proxy",
@@ -235,8 +272,9 @@ cfg.setdefault("provider", {})["parity-proxy"] = {
 }
 cfg["model"] = "parity-proxy/" + os.environ["LLM_MODEL"]
 json.dump(cfg, open(p, "w"), indent=2)
-'
+' || { warn "could not parse $f — merge manually (see harnesses/opencode.md)"; return 0; }
   else
+    backup_file "$f"
     cat > "$f" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
@@ -259,6 +297,101 @@ EOF
   fi
   chmod 600 "$f"
   say "wrote     $f"
+}
+
+write_zed() { # sets ZED_WRITTEN=1 on success; always returns 0, matching the other write_* functions
+  local f="$HOME/.config/zed/settings.json"
+  mkdir -p "$(dirname "$f")"
+  if [ -f "$f" ]; then
+    command -v python3 >/dev/null 2>&1 || { warn "zed settings.json exists and python3 is missing — merge manually (see harnesses/zed.md)"; return 0; }
+    # Zed's own generated file always opens with a "// Zed settings" comment
+    # header, and its settings UI writes trailing commas — so plain
+    # json.loads fails on nearly every real install. Both are safe to strip
+    # here: a JSON string can never contain a literal newline, so a physical
+    # line whose first non-whitespace chars are "//" can only be a line
+    # comment, never string content; trailing-comma removal below tracks
+    # string state so it can't touch a comma inside a quoted value either.
+    # Anything left unparseable (block comments, same-line trailing
+    # comments) still bails out untouched rather than risking a bad rewrite.
+    # A successful merge does re-serialize the file, so any comments —
+    # including Zed's own default header — don't survive; see zed.md.
+    py_merge_safe "$f" '
+import json, os, sys
+p = os.environ["LLM_FILE"]
+try:
+    raw = open(p).read()
+    no_comments = "\n".join(
+        line for line in raw.split("\n") if not line.strip().startswith("//")
+    )
+    def strip_trailing_commas(text):
+        out, in_str, i, n = [], False, 0, len(text)
+        while i < n:
+            c = text[i]
+            if in_str:
+                out.append(c)
+                if c == "\\" and i + 1 < n:
+                    out.append(text[i + 1]); i += 2; continue
+                if c == "\"":
+                    in_str = False
+                i += 1; continue
+            if c == "\"":
+                in_str = True; out.append(c); i += 1; continue
+            if c == ",":
+                j = i + 1
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                if j < n and text[j] in "}]":
+                    i += 1; continue
+            out.append(c); i += 1
+        return "".join(out)
+    cleaned = strip_trailing_commas(no_comments)
+    cfg = json.loads(cleaned) if cleaned.strip() else {}
+except Exception:
+    sys.exit(3)
+lm = cfg.setdefault("language_models", {}).setdefault("openai_compatible", {})
+lm.pop("parity_proxy", None)  # migrate a legacy hand-configured underscore id away
+lm["parity-proxy"] = {
+    "api_url": "https://%s/v1" % os.environ["LLM_BASE"],
+    "available_models": [
+        {
+            "name": os.environ["LLM_MODEL"],
+            "display_name": "%s (proxy)" % os.environ["LLM_MODEL"],
+            "max_tokens": 128000,
+        }
+    ],
+}
+json.dump(cfg, open(p, "w"), indent=2)
+' || { warn "could not parse $f (comments or trailing commas?) — add the provider manually (see harnesses/zed.md)"; return 0; }
+  else
+    backup_file "$f"
+    cat > "$f" <<EOF
+{
+  "language_models": {
+    "openai_compatible": {
+      "parity-proxy": {
+        "api_url": "https://$BASE/v1",
+        "available_models": [
+          {
+            "name": "$MODEL",
+            "display_name": "$MODEL (proxy)",
+            "max_tokens": 128000
+          }
+        ]
+      }
+    }
+  }
+}
+EOF
+  fi
+  chmod 600 "$f"
+  say "wrote     $f"
+  # Zed is normally launched from the Dock/Spotlight/Finder, not a shell, so
+  # it never sees a plain `export` from .zshrc — only launchd's own
+  # per-login-session environment reaches GUI apps launched that way.
+  # launchctl setenv covers that path too; a terminal-launched Zed already
+  # gets the var from env.sh regardless.
+  command -v launchctl >/dev/null 2>&1 && launchctl setenv PARITY_PROXY_API_KEY "$KEY" 2>/dev/null
+  ZED_WRITTEN=1
 }
 
 write_codex() {
@@ -296,15 +429,17 @@ EOF
 
 write_pi() {
   local f="$HOME/.pi/agent/models.json"
-  backup_file "$f"
   mkdir -p "$(dirname "$f")"
   if [ -f "$f" ]; then
     command -v python3 >/dev/null 2>&1 || { warn "pi models.json exists and python3 is missing — merge manually (see harnesses/pi.md)"; return 0; }
     # shellcheck disable=SC2016  # $LLM_PROXY_KEY below is written literally on purpose
-    py_merge "$f" '
-import json, os
+    py_merge_safe "$f" '
+import json, os, sys
 p = os.environ["LLM_FILE"]
-cfg = json.load(open(p))
+try:
+    cfg = json.load(open(p))
+except Exception:
+    sys.exit(3)
 cfg.setdefault("providers", {})["parity-proxy"] = {
     "baseUrl": "https://%s/v1" % os.environ["LLM_BASE"],
     "api": "openai-completions",
@@ -314,8 +449,9 @@ cfg.setdefault("providers", {})["parity-proxy"] = {
                 "input": ["text"]}],
 }
 json.dump(cfg, open(p, "w"), indent=2)
-'
+' || { warn "could not parse $f — merge manually (see harnesses/pi.md)"; return 0; }
   else
+    backup_file "$f"
     cat > "$f" <<EOF
 {
   "providers": {
@@ -364,7 +500,7 @@ LLM proxy credential setup.
 
 Non-interactive flags (any missing value is prompted for):
   --key sk-...  --model deepseek/deepseek-chat
-  --harnesses claude-code,opencode,codex,pi,env  --yes
+  --harnesses claude-code,opencode,codex,pi,zed,oh-my-pi,env  --yes
 Base URL defaults to https://llm.substrate.dev — pass --url to override.
 
 Works piped (no checkout) too:  $GH_RAW_CMD | bash -s -- status
@@ -431,12 +567,14 @@ if [ -z "$HARNESSES" ]; then
   say "  3. Codex CLI     (~/.codex/config.toml)"
   say "  4. Pi            (~/.pi/agent/models.json)"
   say "  5. Generic env   (OPENAI_* vars — Aider, Qwen Code, most others)"
+  say "  6. Zed           (~/.config/zed/settings.json)"
+  say "  7. oh-my-pi      (LITELLM_* vars — models are discovered)"
   prompt "Comma-separated numbers, or 'all'" "all"
   HARNESSES="$REPLY"
 fi
-SEL_CLAUDE=0 SEL_OPENCODE=0 SEL_CODEX=0 SEL_PI=0 SEL_ENV=0
+SEL_CLAUDE=0 SEL_OPENCODE=0 SEL_CODEX=0 SEL_PI=0 SEL_ENV=0 SEL_ZED=0 SEL_OMP=0
 if [ "$HARNESSES" = "all" ]; then
-  SEL_CLAUDE=1 SEL_OPENCODE=1 SEL_CODEX=1 SEL_PI=1 SEL_ENV=1
+  SEL_CLAUDE=1 SEL_OPENCODE=1 SEL_CODEX=1 SEL_PI=1 SEL_ENV=1 SEL_ZED=1 SEL_OMP=1
 else
   OLDIFS=$IFS; IFS=','
   for h in $HARNESSES; do
@@ -447,6 +585,8 @@ else
       3|codex)       SEL_CODEX=1 ;;
       4|pi)          SEL_PI=1 ;;
       5|env)         SEL_ENV=1 ;;
+      6|zed)         SEL_ZED=1 ;;
+      7|oh-my-pi|ohmypi|omp) SEL_OMP=1 ;;
       "") ;;
       *) die "unknown harness: $h" ;;
     esac
@@ -464,6 +604,8 @@ if [ -f "$MANIFEST" ]; then
       codex)       SEL_CODEX=1 ;;
       pi)          SEL_PI=1 ;;
       env)         SEL_ENV=1 ;;
+      zed)         SEL_ZED=1 ;;
+      oh-my-pi)    SEL_OMP=1 ;;
     esac
   done < "$MANIFEST"
 fi
@@ -482,6 +624,8 @@ mv "$MANIFEST.tmp" "$MANIFEST"
   if [ "$SEL_CODEX" = "1" ];    then printf 'harness\tcodex\n'; fi
   if [ "$SEL_PI" = "1" ];       then printf 'harness\tpi\n'; fi
   if [ "$SEL_ENV" = "1" ];      then printf 'harness\tenv\n'; fi
+  if [ "$SEL_ZED" = "1" ];      then printf 'harness\tzed\n'; fi
+  if [ "$SEL_OMP" = "1" ];      then printf 'harness\toh-my-pi\n'; fi
 } >> "$MANIFEST"
 
 write_env_file
@@ -490,10 +634,18 @@ hook_rc_files
 [ "$SEL_OPENCODE" = "1" ] && write_opencode
 [ "$SEL_CODEX" = "1" ]    && write_codex
 [ "$SEL_PI" = "1" ]       && write_pi
+ZED_WRITTEN=0
+[ "$SEL_ZED" = "1" ]      && write_zed
 
 say ""
 say "Done. Now run:  source $ENV_FILE   (or open a new terminal)"
 if [ "$SEL_CLAUDE" = "1" ]; then
   say "Claude Code: run parity-claude (plain claude is untouched; parity-claude --model <alias> for one session)"
+fi
+if [ "$ZED_WRITTEN" = "1" ]; then
+  say "Zed: quit it if it's running, then reopen and pick the model under the parity-proxy provider in the Agent Panel"
+fi
+if [ "$SEL_OMP" = "1" ]; then
+  say "oh-my-pi: run omp --model litellm/$MODEL (every proxy model is discovered, see /models)"
 fi
 say "Undo anytime with: $SELF cleanup"

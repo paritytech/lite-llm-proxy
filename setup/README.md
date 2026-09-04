@@ -24,7 +24,7 @@ curl https://llm.substrate.dev/v1/models -H "Authorization: Bearer $LLM_PROXY_KE
 
 ## 2. Configure your harness
 
-One command — asks for your key and model, then installs a `parity-claude` wrapper for Claude Code (plain `claude` stays on your own account) and configures OpenCode, Codex, Pi, and generic `OPENAI_*` env vars. Run it whichever way you prefer:
+One command — asks for your key and model, then installs a `parity-claude` wrapper for Claude Code (plain `claude` stays on your own account) and configures OpenCode, Codex, Pi, Zed, oh-my-pi, and generic `OPENAI_*` env vars. Run it whichever way you prefer:
 
 **curl:**
 
@@ -53,6 +53,7 @@ All others:
 
 | Harness | Type | Proxy support | Guide |
 |---|---|---|---|
+| oh-my-pi | CLI | ✅ | [oh-my-pi.md](harnesses/oh-my-pi.md) |
 | Aider | CLI | ✅ | [aider.md](harnesses/aider.md) |
 | Goose | CLI | ✅ | [goose.md](harnesses/goose.md) |
 | Crush | CLI | ✅ | [crush.md](harnesses/crush.md) |
