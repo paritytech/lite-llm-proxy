@@ -193,7 +193,7 @@ rm /tmp/ct.txt
 ## Pricing model (how spend stays accurate, and why the UI can disagree with provider dashboards)
 
 - **OpenRouter** returns the real per-call cost; LiteLLM records that directly — **streaming
-  included** on the pinned v1.95.0 image (upstream fix PR #32255, stable since v1.94.0; on
+  included** since the v1.95.0 image (upstream fix PR #32255, stable since v1.94.0; on
   ≤ v1.93 streamed responses dropped the inline cost — BerriAI/litellm#16021 — and fell back to
   the price map, metering **$0** for map-missing models, which is why seven curated aliases
   carried temporary list-price pins from 2026-07-24). **Spot-check PASSED 2026-08-12**: a
@@ -213,10 +213,33 @@ rm /tmp/ct.txt
   output, AND cache-read pins all apply. Re-run this two-call check (same ~4k-token prompt
   twice, `stream_options.include_usage` on, compare spend-log rows against the pin
   arithmetic) after an image bump or any pin change.
+- **Self-hosted vLLM pod (the three `deepseek-flash*` `hosted_vllm` entries)** returns no cost,
+  and is pinned to an explicit **$0** (since 2026-09-04; before that a throttle pin at
+  OpenRouter's rate made pod tokens drain key budgets, which meant refreshing budgets by hand).
+  Pod calls therefore land in the spend logs at `spend = 0` — correct, not a missing pin. Keep
+  the pin a literal `0` on ALL THREE entries: with no pin LiteLLM looks the served model up in
+  the price map, which has no `hosted_vllm/` entry for it, cost calculation fails, and a failed
+  cost calc writes NO spend-log row (the request vanishes from /ui Logs and the corpus export).
+  A `0` is honored (v1.97.0 source: the router registers a `not None` pin under the deployment
+  id; `use_custom_pricing_for_model` checks `is not None` and steers cost calc to that entry;
+  the cost calculator treats an explicit 0/0 as "no token pricing" and returns $0 without
+  consulting the map or cache-token prices; the spend-log row is written for any non-None
+  cost). Side effect: LiteLLM SKIPS key/team/user budget checks for a model group whose
+  deployments are all explicitly $0 (`_is_model_cost_zero` in user_api_key_auth), so an
+  over-budget key can still call all three pod aliases. For `deepseek-flash` that means an
+  over-budget key still reaches the OpenRouter fallback while the pod is down and bills real
+  spend — bounded only by per-key rpm and the OpenRouter credit limit. The fallback itself is
+  unaffected: cost comes from the deployment that answered, and the `openrouter/*` wildcard it
+  lands on is pin-free. **Spot-check after any image bump or pin change:** one
+  `deepseek-flash-parity` call → its spend-log row has `spend = 0` and non-zero
+  `total_tokens`; one `deepseek-flash-openrouter` call → `spend` equals OpenRouter's reported
+  cost; and with a key whose `max_budget` is already exceeded, one `deepseek-flash-parity`
+  call succeeds (budget check skipped) while a `kimi-k2` call is rejected.
 - **Wildcard caveat — fixed at v1.94.0, verified on this box 2026-08-12:** a model reached via
   `openrouter/*` with no map entry used to meter $0 on *streaming* requests (a wildcard can't
-  carry a pin). Our pinned image (v1.95.0) includes the upstream fix and the spot-check passed
-  (streamed spend == OpenRouter's reported `cost`). Re-run the spot-check after any future
+  carry a pin). Our pinned image (v1.95.0 then, v1.97.0 now) includes the upstream fix and the
+  spot-check passed (streamed spend == OpenRouter's reported `cost`). Re-run the spot-check
+  after any future
   image bump: stream one wildcard-model request (`"stream": true`,
   `"stream_options": {"include_usage": true}`), then confirm the spend-log row's `spend`
   matches the final chunk's `cost`. The OpenRouter key's own **credit limit** stays on as
@@ -225,7 +248,8 @@ rm /tmp/ct.txt
   the LiteLLM UI buckets days in UTC while provider dashboards may use local time; OpenRouter's
   billed cost includes its BYOK/provider fees which the price map doesn't model; and map-priced
   streamed calls use list prices, not the routed provider's actual price. Large gaps (2×, or
-  models showing $0) mean a missing/stale map entry or a missing pin — check
+  models showing $0) mean a missing/stale map entry or a missing pin — except the three
+  `deepseek-flash*` pod entries, which are deliberately pinned to $0 (see above) — check
   `SELECT model, SUM(spend) FROM "LiteLLM_SpendLogs" GROUP BY 1` against the provider's own
   per-model breakdown to find which model is drifting.
 

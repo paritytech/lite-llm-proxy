@@ -51,10 +51,10 @@ model_list:
   # 2026-08-12: a streamed wildcard call to a map-missing model recorded spend equal
   # to OpenRouter's reported cost, so the pins came off. Do NOT re-add price pins to
   # OpenRouter models — a pin OVERRIDES the real per-call cost. Pins belong only on
-  # providers that return no cost (Kimi above) or as a deliberate budget throttle
-  # (deepseek-flash below). The price map is auto-fetched from GitHub at startup and
-  # refreshed by the nightly cron (POST /reload/model_cost_map); for OpenRouter it
-  # only matters as a fallback, never the primary source.
+  # providers that return no cost (Kimi above) or as the explicit $0 pin on the
+  # self-hosted deepseek-flash pod entries (below). The price map is auto-fetched from
+  # GitHub at startup and refreshed by the nightly cron (POST /reload/model_cost_map);
+  # for OpenRouter it only matters as a fallback, never the primary source.
   - model_name: claude-sonnet
     litellm_params:
       model: openrouter/anthropic/claude-sonnet-4.6
@@ -116,11 +116,30 @@ model_list:
   # change here — the pod just re-dials. Topology + box setup + rollout: RUNBOOK § I.
   # Prompts sent to this alias never leave Parity infrastructure (unless the
   # OpenRouter fallback below fires — see litellm_settings).
-  # Cost pin: self-hosted means no per-call provider cost arrives, so unpinned calls
-  # would meter $0 and dollar budgets would stop throttling exactly when tokens look
-  # "free". Pinned at what OpenRouter actually billed us for this model (least-squares
-  # over 759 logged calls, 2026-08-05..09: $0.118/1M in, $0.358/1M out), rounded UP so
-  # budgets over- rather than under-throttle. A throttle proxy, not a real cost.
+  # Cost pin: an EXPLICIT $0 (since 2026-09-04). Pod tokens are free to the team — the
+  # GPU is already paid for — so pod-served calls must not drain anyone's key budget.
+  # (Until then a throttle pin at OpenRouter's rate, $0.15/1M in / $0.40/1M out, made
+  # "free" tokens eat quotas, which in practice just meant refreshing budgets by hand.)
+  # Why pin 0 instead of deleting the pin: with NO pin LiteLLM looks the served model up
+  # in the price map, which has no hosted_vllm entry for it — cost calculation then
+  # fails, and a failed cost calc means NO spend-log row at all (the request vanishes
+  # from /ui Logs and the corpus export). A literal 0 is honored (verified in the v1.97.0
+  # source): the router registers the pin under the deployment id whenever it is
+  # `not None`, use_custom_pricing_for_model (also `is not None`) steers cost calc to
+  # that entry, the cost calculator treats an explicit 0/0 as "no token pricing" and
+  # returns $0 without consulting the map or any cache-token price, and the spend-log
+  # row is written for any non-None cost — so pod calls still land in the logs, at $0.
+  # Two consequences to keep in mind:
+  #   1. Key budgets no longer throttle pod traffic at all — the per-entry
+  #      max_parallel_requests caps below and per-key rpm limits are the only brakes.
+  #   2. LiteLLM SKIPS the budget check entirely for a model group whose deployments are
+  #      all explicitly $0 (user_api_key_auth `_is_model_cost_zero`), so a key that is
+  #      already over budget can still call these three aliases. Fine for the pod-ONLY
+  #      aliases; for deepseek-flash it means an over-budget key still reaches the
+  #      OpenRouter fallback while the pod is down, and that fallback bills real spend
+  #      (bounded only by per-key rpm and the OpenRouter credit limit).
+  # The fallback itself is NOT made free: cost is computed from the deployment that
+  # actually answered, and the wildcard entry it lands on is pin-free.
   - model_name: deepseek-flash
     litellm_params:
       # Served model name: `curl 127.0.0.1:9001/v1/models` on the pod. Keep the
@@ -128,8 +147,8 @@ model_list:
       model: hosted_vllm/deepseek-v4-flash-0731
       api_base: http://host.docker.internal:18000/v1
       api_key: os.environ/VLLM_API_KEY
-      input_cost_per_token: 0.00000015
-      output_cost_per_token: 0.0000004
+      input_cost_per_token: 0
+      output_cost_per_token: 0
       # Pod benchmark (1x B300, 2026-08-08): throughput holds up to ~32 parallel
       # requests. Cap below that knee; excess spills to the fallback instead of
       # queueing on a saturated GPU. NOTE: caps are PER ENTRY — the pod's real
@@ -160,8 +179,8 @@ model_list:
       model: hosted_vllm/deepseek-v4-flash-0731
       api_base: http://host.docker.internal:18000/v1
       api_key: os.environ/VLLM_API_KEY
-      input_cost_per_token: 0.00000015
-      output_cost_per_token: 0.0000004
+      input_cost_per_token: 0
+      output_cost_per_token: 0
       # Unchanged at 8 since launch — the versioned twin's slots were carved out of
       # deepseek-flash's cap instead, so existing users of THIS alias keep their
       # capacity (see deepseek-flash's cap note for the 20 + 8 + 4 = 32 arithmetic).
@@ -180,8 +199,8 @@ model_list:
       model: hosted_vllm/deepseek-v4-flash-0731
       api_base: http://host.docker.internal:18000/v1
       api_key: os.environ/VLLM_API_KEY
-      input_cost_per_token: 0.00000015
-      output_cost_per_token: 0.0000004
+      input_cost_per_token: 0
+      output_cost_per_token: 0
       max_parallel_requests: 4
 
   # OpenRouter ONLY: a curated name for what the openrouter/* wildcard already
