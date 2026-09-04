@@ -166,6 +166,28 @@ write_env_file() { # uses BASE KEY MODEL SEL_*
 # and background tasks; the key is sourced from env.sh at run time.
 WRAPPER="$HOME/.local/bin/parity-claude"
 
+write_omp_config() { # uses MODEL — bakes in a default so `omp` alone uses the
+  # proxy without --model, matching OpenCode's baked-in default. YAML has no
+  # safe stdlib parser the way JSON does, so this only ever appends a new
+  # top-level key to an existing file (safe: doesn't touch anything else in
+  # it) and backs off entirely, with a warning, if modelRoles already exists
+  # rather than risk misreading someone's existing default/other roles.
+  local f="$HOME/.omp/agent/config.yml" existed=0
+  mkdir -p "$(dirname "$f")"
+  if [ -f "$f" ]; then
+    existed=1
+    if grep -q '^modelRoles:' "$f"; then
+      warn "$f already has a modelRoles block — add 'default: litellm/$MODEL' under it yourself (see harnesses/oh-my-pi.md)"
+      return 0
+    fi
+  fi
+  backup_file "$f"
+  [ "$existed" = "1" ] && printf '\n' >> "$f"
+  printf 'modelRoles:\n  default: litellm/%s\n' "$MODEL" >> "$f"
+  say "wrote     $f"
+  OMP_DEFAULT_SET=1
+}
+
 write_claude_wrapper() { # uses BASE MODEL
   backup_file "$WRAPPER"
   mkdir -p "$(dirname "$WRAPPER")"
@@ -635,7 +657,9 @@ hook_rc_files
 [ "$SEL_CODEX" = "1" ]    && write_codex
 [ "$SEL_PI" = "1" ]       && write_pi
 ZED_WRITTEN=0
+OMP_DEFAULT_SET=0
 [ "$SEL_ZED" = "1" ]      && write_zed
+[ "$SEL_OMP" = "1" ]      && write_omp_config
 
 say ""
 say "Done. Now run:  source $ENV_FILE   (or open a new terminal)"
@@ -646,6 +670,10 @@ if [ "$ZED_WRITTEN" = "1" ]; then
   say "Zed: quit it if it's running, then reopen and pick the model under the parity-proxy provider in the Agent Panel"
 fi
 if [ "$SEL_OMP" = "1" ]; then
-  say "oh-my-pi: run omp --model litellm/$MODEL (every proxy model is discovered, see /models)"
+  if [ "$OMP_DEFAULT_SET" = "1" ]; then
+    say "oh-my-pi: run omp — $MODEL is now the default (every proxy model is discovered, see /models)"
+  else
+    say "oh-my-pi: run omp --model litellm/$MODEL (every proxy model is discovered, see /models)"
+  fi
 fi
 say "Undo anytime with: $SELF cleanup"
