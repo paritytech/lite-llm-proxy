@@ -188,9 +188,50 @@ write_omp_config() { # uses MODEL — bakes in a default so `omp` alone uses the
   OMP_DEFAULT_SET=1
 }
 
-write_claude_wrapper() { # uses BASE MODEL
+# deepseek-flash and its three siblings are custom hosted_vllm entries with no
+# built-in LiteLLM cost-map data, so /model_group/info reports their context
+# window as null (verified 2026-09-04) even though the underlying model
+# (deepseek-v4-flash-0731) supports the same 1M window as its deepseek-v4-pro
+# sibling. Remove this override once the live lookup below reports a real
+# number for these on its own.
+claude_code_context_override() { # <model> -> prints tokens, or nothing
+  case "$1" in
+    deepseek-flash|deepseek-flash-parity|deepseek-flash-parity-*|deepseek-flash-openrouter)
+      printf '1048576' ;;
+  esac
+}
+
+# Asks the proxy for $MODEL's real context window, since Claude Code assumes
+# 200k and compacts too early for any model name it doesn't recognize.
+claude_code_max_context_tokens() { # <model> -> prints tokens, or nothing
+  local model="$1" looked_up
+  looked_up="$(curl -sf --max-time 10 "https://$BASE/model_group/info" \
+    -H "Authorization: Bearer $KEY" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+rows = rows.get("data", rows)
+target = sys.argv[1]
+for row in rows:
+    if row.get("model_group") == target:
+        tokens = row.get("max_input_tokens")
+        if tokens:
+            print(int(tokens))
+        break
+' "$model" 2>/dev/null)"
+  if [ -n "$looked_up" ]; then
+    printf '%s' "$looked_up"
+  else
+    claude_code_context_override "$model"
+  fi
+}
+
+write_claude_wrapper() { # uses BASE KEY MODEL
   backup_file "$WRAPPER"
-  mkdir -p "$(dirname "$WRAPPER")"
+  mkdir -p "$(dirname "$WRAPPER")" "$LLM_DIR/claude"
+  local max_context; max_context="$(claude_code_max_context_tokens "$MODEL")"
   # shellcheck disable=SC2016  # $LLM_PROXY_KEY / $@ are written literally on purpose
   {
     printf '#!/bin/sh\n'
@@ -203,11 +244,50 @@ write_claude_wrapper() { # uses BASE MODEL
     printf 'export ANTHROPIC_DEFAULT_SONNET_MODEL="%s"\n' "$MODEL"
     printf 'export ANTHROPIC_DEFAULT_HAIKU_MODEL="%s"\n' "$MODEL"
     printf 'export ANTHROPIC_DEFAULT_FABLE_MODEL="%s"\n' "$MODEL"
+    # Claude Code's saved /model picks live in a config dir shared with plain
+    # `claude`, so without this a real-account model choice made in one can
+    # silently leak into the other and get sent to a backend that doesn't
+    # serve it (hit live 2026-09-04: a plain-session pick of a newly released
+    # model leaked into parity-claude and 400'd). Isolating the config dir
+    # keeps proxy sessions' saved defaults from ever touching the real ones.
+    printf 'export CLAUDE_CONFIG_DIR="%s/claude"\n' "$LLM_DIR"
+    if [ -n "$max_context" ]; then
+      printf 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS="%s"\n' "$max_context"
+    fi
+    # These sessions aren't a real Anthropic account, so its account-tied
+    # features (feedback, usage credits, error reports to Anthropic) don't
+    # apply; disabling non-essential traffic also stops feature-flag checks,
+    # which breaks Remote Control — an accepted trade for this wrapper.
+    printf 'export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n'
+    printf 'export CLAUDE_CODE_ATTRIBUTION_HEADER=0\n'
+    printf 'export DISABLE_FEEDBACK_COMMAND=1\n'
+    printf 'export DISABLE_EXTRA_USAGE_COMMAND=1\n'
+    printf 'export DISABLE_ERROR_REPORTING=1\n'
     printf 'command -v claude >/dev/null || { echo "claude not installed: npm install -g @anthropic-ai/claude-code" >&2; exit 127; }\n'
     printf 'exec claude "$@"\n'
   } > "$WRAPPER"
   chmod 755 "$WRAPPER"
   say "wrote     $WRAPPER"
+  sync_claude_isolated_settings
+}
+
+# Re-syncs real UI/behavior preferences (plugins, theme, effort, voice,
+# permission-prompt skip) into the isolated CLAUDE_CONFIG_DIR every run,
+# minus "model" — the one field that caused the leak this isolation exists
+# to prevent. Best-effort: silently skipped if python3 or the real settings
+# file is missing.
+sync_claude_isolated_settings() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  [ -f "$HOME/.claude/settings.json" ] || return 0
+  python3 -c '
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except ValueError:
+    sys.exit(0)
+cfg.pop("model", None)
+json.dump(cfg, open(sys.argv[2], "w"), indent=2)
+' "$HOME/.claude/settings.json" "$LLM_DIR/claude/settings.json" 2>/dev/null || true
 }
 
 hook_rc_files() {
