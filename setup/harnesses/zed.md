@@ -5,13 +5,15 @@
 
 ## Configure
 
+The [setup script](../README.md) writes this provider into `~/.config/zed/settings.json` and exports the key for you. It tolerates Zed's own comment header and trailing commas; a genuine syntax error instead prints a warning and needs a manual merge. A successful merge re-serializes the whole file, so existing comments — including that header — don't survive; your actual settings do.
+
 `settings.json` (`zed: open settings`):
 
 ```json
 {
   "language_models": {
     "openai_compatible": {
-      "parity_proxy": {
+      "parity-proxy": {
         "api_url": "https://llm.substrate.dev/v1",
         "available_models": [
           {
@@ -26,11 +28,11 @@
 }
 ```
 
-Supply the key via the env var named after the provider ID — `export PARITY_PROXY_API_KEY="$LLM_PROXY_KEY"` — or paste it in the provider's settings UI. **Never put the key in settings.json.**
+Restart Zed after editing, then pick the model under the `parity-proxy` provider. Supply the key via the env var named after the provider ID — `export PARITY_PROXY_API_KEY="$LLM_PROXY_KEY"` — or paste it in the provider's settings UI. **Never put the key in settings.json.**
 
 ## Switch models
 
-Agent Panel model dropdown, under the `parity_proxy` provider section.
+Agent Panel model dropdown, under the `parity-proxy` provider section.
 
 ## Gotchas
 
