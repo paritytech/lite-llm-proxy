@@ -54,8 +54,12 @@ This config drives a **live, shared production service** at `https://llm.substra
   **OpenRouter entries must stay pin-free**: a hardcoded `input_/output_cost_per_token` pin
   *overrides* the real cost. Pins belong in exactly two cases: a provider that returns no
   per-call cost (Kimi/Moonshot — pin models too new for LiteLLM's auto-fetched price map, and
-  remove the pin once the map catches up), and the deliberate budget-throttle pin on the
-  three self-hosted `deepseek-flash*` pod entries (see the comments there).
+  remove the pin once the map catches up), and the explicit **$0** pin on the three self-hosted
+  `deepseek-flash*` pod entries — pod tokens are free to teammates and must not drain key
+  budgets, and the pin has to be a literal `0` rather than absent (absent = "look up the price
+  map", which has no entry for the pod's served model, so cost calc fails and the request is
+  dropped from the spend logs). Note that LiteLLM skips budget checks entirely for $0 model
+  groups, so over-budget keys can still use the pod aliases. See the comments there.
 - **"Enable model X" requests are usually a no-op.** The `openrouter/*` wildcard in `config.yaml`
   already serves every OpenRouter model by its full ID (`openrouter/<org>/<model>`), with spend
   metered from OpenRouter's real per-call cost — no config change, no price pin, no deploy. Only

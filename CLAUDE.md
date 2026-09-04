@@ -43,7 +43,10 @@ test suite — it's config, scripts, and docs.
   possible temporary price pin).
 - **Never add price pins to OpenRouter entries** — OpenRouter's real per-call cost is recorded
   directly (streamed included, verified 2026-08-12), and a pin overrides it. Pins are only for
-  Kimi models missing from the price map, and the deliberate `deepseek-flash` budget throttle.
+  Kimi models missing from the price map, and the explicit `0` pin on the three self-hosted
+  `deepseek-flash*` pod entries (pod tokens are free to teammates; keep it a literal `0`, never
+  delete it — an absent price means "unmapped model" to LiteLLM, and unmapped requests are
+  dropped from the spend logs). `$0` also makes LiteLLM skip budget checks for those aliases.
 - **`deepseek-flash` is self-hosted** (Parity vLLM pod → reverse SSH tunnel into the box, with
   OpenRouter fallback) and ships as **four aliases**: `deepseek-flash` (pod + fallback),
   `deepseek-flash-parity` (pod ONLY — no fallback, the hard prompts-stay-in-infra guarantee),
