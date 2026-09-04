@@ -32,7 +32,7 @@ providers:
 
 ## Switch models
 
-`omp --model litellm/<MODEL_NAME>` per launch, or `/models` in the TUI. To make one the default, in `~/.omp/agent/config.yml`:
+The [setup script](../README.md) writes your chosen model as the default (below), so plain `omp` already uses it — `--model litellm/<MODEL_NAME>` per launch overrides it for one session, or `/models` in the TUI. To set the default yourself, in `~/.omp/agent/config.yml`:
 
 ```yaml
 modelRoles:
