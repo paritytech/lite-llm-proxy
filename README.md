@@ -67,7 +67,7 @@ Send one of these as the `"model"` field:
 | `deepseek-v4-pro` | DeepSeek V4 Pro |
 | `deepseek-flash` | DeepSeek V4 Flash — **self-hosted on Parity's own GPU** (testing), cloud fallback. **Free** when the pod answers ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
 | `deepseek-flash-parity` | DeepSeek V4 Flash — self-hosted **only**, no cloud fallback. **Free** (testing; [details](#deepseek-flash-self-hosted-vs-openrouter)) |
-| `deepseek-flash-parity-v4-0731` | Same as `deepseek-flash-parity`, with the served model version pinned in the name. **Free** ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
+| `deepseek-flash-parity-v4.1` | Same as `deepseek-flash-parity`, with the served model version pinned in the name. **Free** ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
 | `deepseek-flash-openrouter` | DeepSeek V4 Flash — OpenRouter **only**, never our GPU ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
 | `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
@@ -116,12 +116,12 @@ whether the model version is pinned in the name):
 |---|---|---|
 | `deepseek-flash` | Parity GPU first; falls back to OpenRouter if the pod is down or saturated | Default — always answers |
 | `deepseek-flash-parity` | Parity GPU **only** — errors fast if the pod is unavailable | Prompts that must never leave Parity infra; testing the pod itself |
-| `deepseek-flash-parity-v4-0731` | Parity GPU **only** — same contract as `deepseek-flash-parity` | You want the name to state exactly which model version answers |
+| `deepseek-flash-parity-v4.1` | Parity GPU **only** — same contract as `deepseek-flash-parity` | You want the name to state exactly which model version answers |
 | `deepseek-flash-openrouter` | OpenRouter **only** — never touches the pod | Comparing pod vs cloud; deliberately bypassing the pod |
 
 The unversioned aliases **float**: when the pod is upgraded to a newer DeepSeek Flash, they
-silently start serving it. The versioned alias is the opposite — `deepseek-flash-parity-v4-0731`
-is a hard-coded promise that you get exactly DeepSeek V4 Flash 0731, and when the pod moves to a
+silently start serving it. The versioned alias is the opposite — `deepseek-flash-parity-v4.1`
+is a hard-coded promise that you get exactly DeepSeek V4.1 Flash, and when the pod moves to a
 new model a new `deepseek-flash-parity-<version>` alias is added alongside (the old one is
 retired once the old model stops being served, so a stale pin fails loudly rather than silently
 answering with a different model).

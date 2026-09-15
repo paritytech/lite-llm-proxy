@@ -71,7 +71,7 @@ This config drives a **live, shared production service** at `https://llm.substra
   It ships as **four aliases** with different routing contracts: `deepseek-flash` (pod first,
   OpenRouter fallback), `deepseek-flash-parity` (pod ONLY — no fallback, the hard
   prompts-stay-in-infra guarantee; fails fast when the pod is down),
-  `deepseek-flash-parity-v4-0731` (pod ONLY like `-parity`, but the name pins exactly which
+  `deepseek-flash-parity-v4.1` (pod ONLY like `-parity`, but the name pins exactly which
   model version the pod serves), and `deepseek-flash-openrouter` (OpenRouter only). Keep the
   three `hosted_vllm` entries' `litellm_params` in lockstep, and mind the parallel caps:
   they're per entry and sum to the pod's ~32-parallel knee (20 + 8 + 4). Changes can involve
