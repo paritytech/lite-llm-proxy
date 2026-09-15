@@ -2,7 +2,7 @@
 
 Shared, budgeted access to **Kimi (Moonshot AI)**, **OpenRouter** (Claude, GPT, Gemini,
 DeepSeek, Llama, … ~400+ models), and **Parity's own self-hosted GPU serving**
-(`deepseek-flash`) for Parity teammates via a self-hosted
+(`auto/deepseek-v4.1-flash`) for Parity teammates via a self-hosted
 [LiteLLM](https://docs.litellm.ai) proxy. One OpenAI-compatible API over HTTPS, gated by
 per-user virtual keys with individual budgets and usage tracking.
 
@@ -65,10 +65,9 @@ Send one of these as the `"model"` field:
 | `deepseek` | DeepSeek V3.2 |
 | `deepseek-r1` | DeepSeek R1 (reasoning) |
 | `deepseek-v4-pro` | DeepSeek V4 Pro |
-| `deepseek-flash` | DeepSeek V4 Flash — **self-hosted on Parity's own GPU** (testing), cloud fallback. **Free** when the pod answers ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
-| `deepseek-flash-parity` | DeepSeek V4 Flash — self-hosted **only**, no cloud fallback. **Free** (testing; [details](#deepseek-flash-self-hosted-vs-openrouter)) |
-| `deepseek-flash-parity-v4.1` | Same as `deepseek-flash-parity`, with the served model version pinned in the name. **Free** ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
-| `deepseek-flash-openrouter` | DeepSeek V4 Flash — OpenRouter **only**, never our GPU ([details](#deepseek-flash-self-hosted-vs-openrouter)) |
+| `auto/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — **self-hosted on Parity's own GPU** (testing), cloud fallback. **Free** when the pod answers ([details](#self-hosted-deepseek-vs-openrouter)) |
+| `parity/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — self-hosted **only**, no cloud fallback. **Free** (testing; [details](#self-hosted-deepseek-vs-openrouter)) |
+| `openrouter/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — OpenRouter **only**, never our GPU ([details](#self-hosted-deepseek-vs-openrouter)) |
 | `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
 
@@ -94,9 +93,9 @@ Notes:
   so only the ones in the table are available.
 - If a model is rejected with a permissions error, your key may be scoped to specific models —
   ask the admin to widen it.
-- `deepseek-flash` runs on **Parity's own GPU pod** (vLLM), not OpenRouter — and comes in four
-  routing flavors; see [`deepseek-flash`: self-hosted vs
-  OpenRouter](#deepseek-flash-self-hosted-vs-openrouter) just below. Requests the pod answers
+- DeepSeek V4.1 Flash runs on **Parity's own GPU pod** (vLLM), not OpenRouter — and comes in
+  three routing flavors; see [Self-hosted DeepSeek vs
+  OpenRouter](#self-hosted-deepseek-vs-openrouter) just below. Requests the pod answers
   are **free**: they record $0 spend and don't count against your key's budget.
 - Spend tracking on OpenRouter models — aliases and wildcard alike — uses OpenRouter's real
   per-call cost, **streamed calls included** (verified on our deployment 2026-08-12: recorded
@@ -106,38 +105,35 @@ Notes:
 `config.yaml` — that gives it a short name and puts it in the menu above. That's how
 `deepseek-v4-pro` and `minimax-m3` were added.
 
-#### `deepseek-flash`: self-hosted vs OpenRouter
+#### Self-hosted DeepSeek vs OpenRouter
 
-DeepSeek V4 Flash is the one model we serve from **Parity's own GPU pod** (vLLM), so it comes in
-four flavors. Same model, same API — the alias picks *where* the request is allowed to run (and
-whether the model version is pinned in the name):
+DeepSeek V4.1 Flash is the one model we serve from **Parity's own GPU pod** (vLLM), so it comes
+in three flavors, named `<routing>/<model-id>` — same model, same API, the prefix picks *where*
+the request is allowed to run:
 
 | Alias | Where it runs | When to use it |
 |---|---|---|
-| `deepseek-flash` | Parity GPU first; falls back to OpenRouter if the pod is down or saturated | Default — always answers |
-| `deepseek-flash-parity` | Parity GPU **only** — errors fast if the pod is unavailable | Prompts that must never leave Parity infra; testing the pod itself |
-| `deepseek-flash-parity-v4.1` | Parity GPU **only** — same contract as `deepseek-flash-parity` | You want the name to state exactly which model version answers |
-| `deepseek-flash-openrouter` | OpenRouter **only** — never touches the pod | Comparing pod vs cloud; deliberately bypassing the pod |
+| `auto/deepseek-v4.1-flash` | Parity GPU first; falls back to OpenRouter if the pod is down or saturated | Default — always answers |
+| `parity/deepseek-v4.1-flash` | Parity GPU **only** — errors fast if the pod is unavailable | Prompts that must never leave Parity infra; testing the pod itself |
+| `openrouter/deepseek-v4.1-flash` | OpenRouter **only** — never touches the pod | Comparing pod vs cloud; deliberately bypassing the pod |
 
-The unversioned aliases **float**: when the pod is upgraded to a newer DeepSeek Flash, they
-silently start serving it. The versioned alias is the opposite — `deepseek-flash-parity-v4.1`
-is a hard-coded promise that you get exactly DeepSeek V4.1 Flash, and when the pod moves to a
-new model a new `deepseek-flash-parity-<version>` alias is added alongside (the old one is
-retired once the old model stops being served, so a stale pin fails loudly rather than silently
-answering with a different model).
+The model id is part of the name on purpose: when the pod moves to a new model version, a new
+set of three aliases is added for it and this set is retired (a stale alias fails loudly rather
+than silently answering with a different model — see `config.yaml`'s naming-note comment for
+the exact rule).
 
 Privacy is the point of the split: requests served by the pod stay entirely on our
 infrastructure, while anything served by OpenRouter follows the normal cloud path. That means
-the default alias's fallback *can* send your prompt to OpenRouter — if that must never happen,
-use `deepseek-flash-parity` and be prepared to handle an error while the pod is down.
+`auto/`'s fallback *can* send your prompt to OpenRouter — if that must never happen, use
+`parity/deepseek-v4.1-flash` and be prepared to handle an error while the pod is down.
 
 Cost follows the same line. Anything the pod answers is **free** — it is logged at $0 and does
-not count against your key's budget (the GPU is already paid for), so the pod-only aliases never
-touch your quota. Anything OpenRouter answers bills at OpenRouter's real cost as usual — including
-`deepseek-flash`'s fallback, so the default alias is free *most* of the time, not always — and
-because $0 models skip the budget check, that fallback bills you even if your key is already
-over budget. The pod's capacity, not your budget, is the limit: it serves a bounded number of
-requests at once, so under heavy use expect slower answers rather than budget errors.
+not count against your key's budget (the GPU is already paid for), so `parity/` never touches
+your quota. Anything OpenRouter answers bills at OpenRouter's real cost as usual — including
+`auto/`'s fallback, so it is free *most* of the time, not always — and because $0 models skip
+the budget check, that fallback bills you even if your key is already over budget. The pod's
+capacity, not your budget, is the limit: it serves a bounded number of requests at once, so
+under heavy use expect slower answers rather than budget errors.
 
 ### Chat UI (Open WebUI)
 
@@ -195,12 +191,13 @@ In CI, store your key as a secret named `LLM_KEY` (or similar) — never commit 
 
 Each key has a monthly `max_budget` and an rpm cap, spanning all models. When you hit your budget,
 requests are rejected until the 30-day window resets. Ask the admin to raise it if you need more.
-The exception is our own GPU: requests the self-hosted pod answers (`deepseek-flash` when the pod
-serves it, and the `deepseek-flash-parity*` aliases always) are metered at **$0**, so they never
-consume your budget — only the rpm cap applies to them. They also keep working after you have hit
-your budget, because LiteLLM skips the budget check for $0 models. One catch: `deepseek-flash`
-falls back to OpenRouter while the pod is down, and that fallback is billed to your key even when
-it is already over budget — use `deepseek-flash-parity` if that matters to you.
+The exception is our own GPU: requests the self-hosted pod answers (`auto/deepseek-v4.1-flash`
+when the pod serves it, and `parity/deepseek-v4.1-flash` always) are metered at **$0**, so they
+never consume your budget — only the rpm cap applies to them. They also keep working after you
+have hit your budget, because LiteLLM skips the budget check for $0 models. One catch:
+`auto/deepseek-v4.1-flash` falls back to OpenRouter while the pod is down, and that fallback is
+billed to your key even when it is already over budget — use `parity/deepseek-v4.1-flash` if
+that matters to you.
 
 ### Logging & privacy
 
@@ -273,7 +270,7 @@ internet ──443/80──> caddy ──┬──> litellm:4000 ──> postgre
          └──8443──── (TLS)   │     (proxy)          (keys / budgets / usage / logs)
                              │        │
                              │        └──> 172.17.0.1:18000 ←─(reverse SSH tunnel)── vLLM GPU pod
-                             │             (host, container-reachable only)          (deepseek-flash, -parity)
+                             │             (host, container-reachable only)          (auto/, parity/)
                              └──> openwebui:8080 ──> litellm:4000
                                    (chat UI, :8443)   (shared budget-capped key)
 ```
@@ -291,13 +288,13 @@ internet ──443/80──> caddy ──┬──> litellm:4000 ──> postgre
   covered by the nightly Postgres dump (see `RUNBOOK.md` § J).
 - **postgres** — virtual keys, budgets, per-key spend, request logs. Persisted in a named volume,
   never published to the host.
-- **vLLM GPU pod** (not part of the compose stack) — Parity's self-hosted backend for
-  `deepseek-flash` ([paritytech/vllm-parity](https://github.com/paritytech/vllm-parity), rented
-  GPU). It has no stable public address, so it dials **into** the box over a restricted SSH
-  account and reverse-binds `172.17.0.1:18000` (docker0 gateway — reachable by containers, not
-  the internet). When the pod is down or saturated, LiteLLM falls back to OpenRouter
-  automatically for `deepseek-flash` — but not for the `deepseek-flash-parity*` aliases, which
-  fail fast by design (see [the models section](#deepseek-flash-self-hosted-vs-openrouter)).
+- **vLLM GPU pod** (not part of the compose stack) — Parity's self-hosted backend for our
+  DeepSeek Flash aliases ([paritytech/vllm-parity](https://github.com/paritytech/vllm-parity),
+  rented GPU). It has no stable public address, so it dials **into** the box over a restricted
+  SSH account and reverse-binds `172.17.0.1:18000` (docker0 gateway — reachable by containers,
+  not the internet). When the pod is down or saturated, LiteLLM falls back to OpenRouter
+  automatically for `auto/deepseek-v4.1-flash` — but not for `parity/deepseek-v4.1-flash`, which
+  fails fast by design (see [the models section](#self-hosted-deepseek-vs-openrouter)).
   Topology, setup,
   and ops: `RUNBOOK.md` § I.
 
@@ -412,15 +409,15 @@ request ──> litellm ──> Postgres LiteLLM_SpendLogs   (hot store: ATTRIBU
   fetched from upstream at startup and refreshed daily by `scripts/reload-costmap.sh`. A model too
   new for the map needs a temporary price pin in `config.yaml` — including
   `cache_read_input_token_cost`, or cached tokens get metered at the full input price.
-- **Self-hosted pod (the `deepseek-flash*` pod entries)** returns no cost either, and is pinned
-  to an explicit **$0** in `config.yaml` — pod tokens are free to teammates and don't touch key
-  budgets. The pin must stay a literal `0` rather than be removed: to LiteLLM an absent price
-  means "look up the price map", which has no entry for the pod's served model, and a request
-  whose cost can't be computed is dropped from the spend logs entirely. A side effect of $0
-  pricing is that LiteLLM skips the budget check for these aliases, so over-budget keys can
-  still use them. The OpenRouter fallback on `deepseek-flash` is unaffected — cost is computed
-  from the deployment that actually answered, so fallback calls bill OpenRouter's real cost,
-  even for a key that is already over budget.
+- **Self-hosted pod (the `auto/`- and `parity/`-prefixed pod entries)** returns no cost either,
+  and is pinned to an explicit **$0** in `config.yaml` — pod tokens are free to teammates and
+  don't touch key budgets. The pin must stay a literal `0` rather than be removed: to LiteLLM an
+  absent price means "look up the price map", which has no entry for the pod's served model, and
+  a request whose cost can't be computed is dropped from the spend logs entirely. A side effect
+  of $0 pricing is that LiteLLM skips the budget check for these aliases, so over-budget keys can
+  still use them. The OpenRouter fallback on `auto/deepseek-v4.1-flash` is unaffected — cost is
+  computed from the deployment that actually answered, so fallback calls bill OpenRouter's real
+  cost, even for a key that is already over budget.
 - **Wildcard caveat (fixed since the v1.95.0 image, verified on-box 2026-08-12):** an `openrouter/*`
   model with no map entry used to meter **$0** on *streaming* requests (a wildcard can't carry a
   pin). Upstream fixed this in v1.94.0 (provider-reported stream cost) and our spot-check

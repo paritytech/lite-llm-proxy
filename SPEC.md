@@ -7,10 +7,10 @@ Status: **shipped & live** at `https://llm.substrate.dev` (Caddy + LiteLLM + Pos
 baremetal box). Since launch it has grown beyond this spec: it fronts **OpenRouter** models
 alongside Kimi, logs full request/response bodies as a training corpus (see
 `docs/specs/2026-07-22-request-logging-design.md`), auto-deploys merged PRs via GitHub Actions
-(`RUNBOOK.md` § H), and serves `deepseek-flash` from **Parity's own vLLM GPU pod** through a
-reverse SSH tunnel with automatic OpenRouter fallback — plus pinned-routing variants
-`deepseek-flash-parity` (pod only, also as version-pinned `deepseek-flash-parity-v4.1`)
-and `deepseek-flash-openrouter` (cloud only) (`RUNBOOK.md` § I). This document captures
+(`RUNBOOK.md` § H), and serves DeepSeek Flash from **Parity's own vLLM GPU pod** through a
+reverse SSH tunnel with automatic OpenRouter fallback, as three `<routing>/<model-id>` aliases —
+`auto/deepseek-v4.1-flash` (pod + fallback), `parity/deepseek-v4.1-flash` (pod only), and
+`openrouter/deepseek-v4.1-flash` (cloud only) (`RUNBOOK.md` § I). This document captures
 the original design; `README.md` and `RUNBOOK.md` are the current, authoritative references.
 
 ---

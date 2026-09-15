@@ -10,7 +10,7 @@ adds Claude-specific notes and repeats the rules that must never be missed.
 
 Deployment definition for the **Team LLM Proxy** — a self-hosted LiteLLM gateway (Docker Compose:
 Caddy + LiteLLM + Open WebUI + Postgres) giving Parity teammates budgeted access to Kimi and OpenRouter models,
-plus `deepseek-flash` served by Parity's own vLLM GPU pod via a reverse SSH tunnel (RUNBOOK § I).
+plus `auto/deepseek-v4.1-flash` served by Parity's own vLLM GPU pod via a reverse SSH tunnel (RUNBOOK § I).
 It drives a **live production service** at `https://llm.substrate.dev`. No app source, no build, no
 test suite — it's config, scripts, and docs.
 
@@ -43,21 +43,22 @@ test suite — it's config, scripts, and docs.
   possible temporary price pin).
 - **Never add price pins to OpenRouter entries** — OpenRouter's real per-call cost is recorded
   directly (streamed included, verified 2026-08-12), and a pin overrides it. Pins are only for
-  Kimi models missing from the price map, and the explicit `0` pin on the three self-hosted
-  `deepseek-flash*` pod entries (pod tokens are free to teammates; keep it a literal `0`, never
-  delete it — an absent price means "unmapped model" to LiteLLM, and unmapped requests are
-  dropped from the spend logs). `$0` also makes LiteLLM skip budget checks for those aliases.
-- **`deepseek-flash` is self-hosted** (Parity vLLM pod → reverse SSH tunnel into the box, with
-  OpenRouter fallback) and ships as **four aliases**: `deepseek-flash` (pod + fallback),
-  `deepseek-flash-parity` (pod ONLY — no fallback, the hard prompts-stay-in-infra guarantee),
-  `deepseek-flash-parity-v4.1` (pod ONLY, version pinned in the name), and
-  `deepseek-flash-openrouter` (cloud only). Keep the three `hosted_vllm` entries in lockstep;
-  their per-entry parallel caps sum to the pod's ~32 knee (20 + 8 + 4). Moving parts span the box
-  (tunnel account, sshd, ufw) and `config.yaml` — read RUNBOOK § I before changing any of it.
-- **The versioned alias hard-codes the pod's model version.** Whenever the pod is redeployed
-  with a new model, the same PR must add the matching `deepseek-flash-parity-<version>` alias
-  and update the model tables in `README.md` and the alias lists here and in `AGENTS.md` —
-  that name is the user-facing promise of exactly which model the pod serves.
+  Kimi models missing from the price map, and the explicit `0` pin on the `auto/`- and
+  `parity/`-prefixed self-hosted pod entries (pod tokens are free to teammates; keep it a
+  literal `0`, never delete it — an absent price means "unmapped model" to LiteLLM, and unmapped
+  requests are dropped from the spend logs). `$0` also makes LiteLLM skip budget checks for
+  those aliases.
+- **DeepSeek Flash is self-hosted** (Parity vLLM pod → reverse SSH tunnel into the box, with
+  OpenRouter fallback) and ships as **three aliases named `<routing>/<model-id>`**:
+  `auto/deepseek-v4.1-flash` (pod + fallback), `parity/deepseek-v4.1-flash` (pod ONLY — no
+  fallback, the hard prompts-stay-in-infra guarantee), and `openrouter/deepseek-v4.1-flash`
+  (cloud only). Keep the two `hosted_vllm` entries in lockstep; their per-entry parallel caps sum
+  to the pod's ~32 knee (20 + 12). Moving parts span the box (tunnel account, sshd, ufw) and
+  `config.yaml` — read RUNBOOK § I before changing any of it.
+- **The model id is part of every alias's name on purpose.** Whenever the pod is redeployed
+  with a new model, the same PR must add a matching new set of three `<routing>/<model-id>`
+  aliases and update the model tables in `README.md` and the alias lists here and in
+  `AGENTS.md` — the name is the user-facing promise of exactly which model answers.
 - After changing deploy/ops behavior, update `RUNBOOK.md` (and `README.md` if it's user-facing).
 - There is no automated test or lint step. "Verification" here means: YAML still parses, the SPDX
   header is present, no secret leaked, and `RUNBOOK.md`/`README.md` still match reality.

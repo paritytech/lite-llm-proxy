@@ -188,15 +188,18 @@ write_omp_config() { # uses MODEL — bakes in a default so `omp` alone uses the
   OMP_DEFAULT_SET=1
 }
 
-# deepseek-flash and its three siblings are custom hosted_vllm entries with no
+# auto/parity-prefixed deepseek models are custom hosted_vllm entries with no
 # built-in LiteLLM cost-map data, so /model_group/info reports their context
 # window as null (verified 2026-09-04) even though the underlying model
 # (deepseek-v4.1-flash) supports the same 1M window as its deepseek-v4-pro
 # sibling. Remove this override once the live lookup below reports a real
-# number for these on its own.
+# number for these on its own. auto/* and parity/* are exclusively ours so a
+# wildcard is safe; openrouter/deepseek-v4.1-flash shares its prefix with the
+# general OpenRouter wildcard, so it's matched by exact name and needs bumping
+# on the next model version (config.yaml's naming-note comment has the rule).
 claude_code_context_override() { # <model> -> prints tokens, or nothing
   case "$1" in
-    deepseek-flash|deepseek-flash-parity|deepseek-flash-parity-*|deepseek-flash-openrouter)
+    auto/*|parity/*|openrouter/deepseek-v4.1-flash)
       printf '1048576' ;;
   esac
 }

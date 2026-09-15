@@ -2,7 +2,7 @@
 
 Connect your coding harness to the LLM proxy in ~5 minutes.
 
-The proxy lives at `https://llm.substrate.dev`. Snippets use one placeholder: `<MODEL_NAME>` — a short alias from the [model menu](../README.md#models) (e.g. `claude-sonnet`, `kimi-k2`, `deepseek-flash`), or a full OpenRouter id prefixed with `openrouter/` (browse [openrouter.ai/models](https://openrouter.ai/models)), e.g. `openrouter/deepseek/deepseek-chat`.
+The proxy lives at `https://llm.substrate.dev`. Snippets use one placeholder: `<MODEL_NAME>` — a short alias from the [model menu](../README.md#models) (e.g. `claude-sonnet`, `kimi-k2`, `auto/deepseek-v4.1-flash`), or a full OpenRouter id prefixed with `openrouter/` (browse [openrouter.ai/models](https://openrouter.ai/models)), e.g. `openrouter/deepseek/deepseek-chat`.
 
 Don't set temperature/reasoning options in your harness config: the self-hosted models (`*-parity`) are preconfigured server-side for agentic workloads with max thinking. The `*-openrouter` variants don't carry those defaults, so the same model can behave slightly differently there.
 
