@@ -655,11 +655,14 @@ if [ -z "$MODEL" ]; then
   MODEL="$REPLY"
 fi
 [ -n "$MODEL" ] || die "a model name is required"
-# Ids pasted from openrouter.ai need the openrouter/ prefix to route through the proxy
+# Ids pasted from openrouter.ai need the openrouter/ prefix to route through the proxy.
+# auto/, parity/, and openrouter/ are our own curated <routing>/<model-id> aliases (the
+# self-hosted deepseek-flash family) — already valid proxy names, leave them alone even
+# though they contain a slash like a pasted openrouter.ai id would.
 case "$MODEL" in
-  openrouter/*) ;;                  # already prefixed
-  */*) MODEL="openrouter/$MODEL" ;; # pasted from openrouter.ai
-esac                                # no slash = proxy alias, leave as-is
+  openrouter/*|auto/*|parity/*) ;;   # already a valid proxy alias
+  */*) MODEL="openrouter/$MODEL" ;;  # pasted from openrouter.ai
+esac                                 # no slash = curated alias, leave as-is
 # A pasted API key would end up in env vars, the model picker, and server logs.
 case "$MODEL" in sk-*) die "'sk-...' looks like an API key, not a model id" ;; esac
 [ "$MODEL" != "$KEY" ] || die "the model equals the API key, paste a model id instead"
