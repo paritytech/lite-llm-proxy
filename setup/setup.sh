@@ -191,7 +191,7 @@ write_omp_config() { # uses MODEL — bakes in a default so `omp` alone uses the
 # deepseek-flash and its three siblings are custom hosted_vllm entries with no
 # built-in LiteLLM cost-map data, so /model_group/info reports their context
 # window as null (verified 2026-09-04) even though the underlying model
-# (deepseek-v4-flash-0731) supports the same 1M window as its deepseek-v4-pro
+# (deepseek-v4.1-flash) supports the same 1M window as its deepseek-v4-pro
 # sibling. Remove this override once the live lookup below reports a real
 # number for these on its own.
 claude_code_context_override() { # <model> -> prints tokens, or nothing

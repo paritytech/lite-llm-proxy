@@ -50,7 +50,7 @@ test suite — it's config, scripts, and docs.
 - **`deepseek-flash` is self-hosted** (Parity vLLM pod → reverse SSH tunnel into the box, with
   OpenRouter fallback) and ships as **four aliases**: `deepseek-flash` (pod + fallback),
   `deepseek-flash-parity` (pod ONLY — no fallback, the hard prompts-stay-in-infra guarantee),
-  `deepseek-flash-parity-v4-0731` (pod ONLY, version pinned in the name), and
+  `deepseek-flash-parity-v4.1` (pod ONLY, version pinned in the name), and
   `deepseek-flash-openrouter` (cloud only). Keep the three `hosted_vllm` entries in lockstep;
   their per-entry parallel caps sum to the pod's ~32 knee (20 + 8 + 4). Moving parts span the box
   (tunnel account, sshd, ufw) and `config.yaml` — read RUNBOOK § I before changing any of it.

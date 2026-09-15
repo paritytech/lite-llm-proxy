@@ -550,7 +550,7 @@ pod: vLLM on 127.0.0.1:9001
 A pod relaunch needs **nothing** on our side: the pod re-dials and the same port comes back.
 While it's down, `deepseek-flash` transparently falls back to OpenRouter (config.yaml
 `fallbacks`), at real OpenRouter cost. Its sibling aliases pin the routing instead:
-`deepseek-flash-parity` and its version-pinned twin `deepseek-flash-parity-v4-0731` (both pod
+`deepseek-flash-parity` and its version-pinned twin `deepseek-flash-parity-v4.1` (both pod
 ONLY) deliberately have no fallback — they fail fast while the pod is down, which is the hard
 prompts-stay-in-infra guarantee and what to use when testing the pod itself — and
 `deepseek-flash-openrouter` never touches the pod at all. The versioned twin hard-codes the
