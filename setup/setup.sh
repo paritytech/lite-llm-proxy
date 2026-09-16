@@ -30,6 +30,9 @@ else
 fi
 
 DEFAULT_BASE="llm.substrate.dev"
+# Our own self-hosted, $0 model, pod-only (no OpenRouter fallback) — the zero-effort
+# default for anyone who just wants to get going without picking a model at all.
+DEFAULT_MODEL="parity/deepseek-v4.1-flash"
 
 LLM_DIR="$HOME/.llm-proxy"
 MANIFEST="$LLM_DIR/manifest"
@@ -628,6 +631,12 @@ if [ -f "$MANIFEST" ]; then
   PREV_URL=$(awk -F'\t' '$1=="base_url"{print $2}' "$MANIFEST")
   PREV_MODEL=$(awk -F'\t' '$1=="model"{print $2}' "$MANIFEST")
   [ -f "$ENV_FILE" ] && PREV_KEY=$(sed -n "s/^export LLM_PROXY_KEY='\(.*\)'$/\1/p" "$ENV_FILE")
+  # A saved model from before the auto/parity/openrouter rename (2026-09-16) no longer
+  # exists — don't re-offer a dead alias as the default, fall through to DEFAULT_MODEL.
+  case "$PREV_MODEL" in
+    deepseek-flash|deepseek-flash-parity|deepseek-flash-parity-*|deepseek-flash-openrouter)
+      PREV_MODEL="" ;;
+  esac
 fi
 
 # 1. Base URL — the team proxy by default; --url overrides (e.g. if it moves)
@@ -648,10 +657,10 @@ fi
 [ -n "$KEY" ] || die "an API key is required"
 case "$KEY" in *"'"*) die "API key must not contain single quotes" ;; esac
 
-# 3. Model — pick any model on https://openrouter.ai/models and paste its id
+# 3. Model — enter for our free self-hosted default, or paste any id from openrouter.ai/models
 if [ -z "$MODEL" ]; then
-  say "Find a model at https://openrouter.ai/models and paste its id."
-  prompt "Model (e.g. deepseek/deepseek-chat)" "$PREV_MODEL"
+  say "Find a model at https://openrouter.ai/models and paste its id, or press enter for the free self-hosted default."
+  prompt "Model" "${PREV_MODEL:-$DEFAULT_MODEL}"
   MODEL="$REPLY"
 fi
 [ -n "$MODEL" ] || die "a model name is required"
