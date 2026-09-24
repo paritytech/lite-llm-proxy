@@ -200,11 +200,8 @@ write_omp_config() { # uses MODEL — bakes in a default so `omp` alone uses the
 # wildcard is safe; openrouter/deepseek-v4.1-flash shares its prefix with the
 # general OpenRouter wildcard, so it's matched by exact name and needs bumping
 # on the next model version (config.yaml's naming-note comment has the rule).
-# parity/deepseek-v4-flash-scw is Scaleway-hosted with a 256k window the live
-# lookup already reports, so it's excluded.
 claude_code_context_override() { # <model> -> prints tokens, or nothing
   case "$1" in
-    parity/deepseek-v4-flash-scw) ;;
     auto/*|parity/*|openrouter/deepseek-v4.1-flash)
       printf '1048576' ;;
   esac
@@ -668,11 +665,11 @@ if [ -z "$MODEL" ]; then
 fi
 [ -n "$MODEL" ] || die "a model name is required"
 # Ids pasted from openrouter.ai need the openrouter/ prefix to route through the proxy.
-# auto/, parity/, and openrouter/ are our own curated <routing>/<model-id> aliases (the
-# self-hosted deepseek-flash family) — already valid proxy names, leave them alone even
+# auto/, parity/, openrouter/ and scaleway/ are our own curated <routing>/<model-id> aliases (the
+# deepseek-flash family), already valid proxy names, leave them alone even
 # though they contain a slash like a pasted openrouter.ai id would.
 case "$MODEL" in
-  openrouter/*|auto/*|parity/*) ;;   # already a valid proxy alias
+  openrouter/*|auto/*|parity/*|scaleway/*) ;;   # already a valid proxy alias
   */*) MODEL="openrouter/$MODEL" ;;  # pasted from openrouter.ai
 esac                                 # no slash = curated alias, leave as-is
 # A pasted API key would end up in env vars, the model picker, and server logs.

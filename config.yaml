@@ -203,9 +203,8 @@ model_list:
 
   # ---- Scaleway Generative APIs (base api.scaleway.ai/<project-id>/v1) ----
   # DeepSeek V4 Flash 0731, the version before 4.1 (Scaleway doesn't serve 4.1 yet).
-  # Not the pod despite the parity/ prefix: prompts go to Scaleway, and calls bill at
-  # the price map's scaleway/ rate. The map has this model, so no price pin.
-  - model_name: parity/deepseek-v4-flash-scw
+  # Calls bill at the price map's scaleway/ rate. The map has this model, so no price pin.
+  - model_name: scaleway/deepseek-v4-flash-0731
     litellm_params:
       model: scaleway/deepseek-v4-flash-0731
       api_key: os.environ/SCALEWAY_API_KEY
