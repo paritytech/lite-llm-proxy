@@ -200,8 +200,11 @@ write_omp_config() { # uses MODEL — bakes in a default so `omp` alone uses the
 # wildcard is safe; openrouter/deepseek-v4.1-flash shares its prefix with the
 # general OpenRouter wildcard, so it's matched by exact name and needs bumping
 # on the next model version (config.yaml's naming-note comment has the rule).
+# parity/deepseek-v4-flash-scw is Scaleway-hosted with a 256k window the live
+# lookup already reports, so it's excluded.
 claude_code_context_override() { # <model> -> prints tokens, or nothing
   case "$1" in
+    parity/deepseek-v4-flash-scw) ;;
     auto/*|parity/*|openrouter/deepseek-v4.1-flash)
       printf '1048576' ;;
   esac
