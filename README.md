@@ -68,6 +68,7 @@ Send one of these as the `"model"` field:
 | `auto/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — **self-hosted on Parity's own GPU** (testing), cloud fallback. **Free** when the pod answers ([details](#self-hosted-deepseek-vs-openrouter)) |
 | `parity/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — self-hosted **only**, no cloud fallback. **Free** (testing; [details](#self-hosted-deepseek-vs-openrouter)) |
 | `openrouter/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — OpenRouter **only**, never our GPU ([details](#self-hosted-deepseek-vs-openrouter)) |
+| `parity/deepseek-v4-flash-scw` | DeepSeek V4 Flash 0731 on Scaleway (256k context) |
 | `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
 
@@ -128,7 +129,7 @@ infrastructure, while anything served by OpenRouter follows the normal cloud pat
 `parity/deepseek-v4.1-flash` and be prepared to handle an error while the pod is down.
 
 Cost follows the same line. Anything the pod answers is **free** — it is logged at $0 and does
-not count against your key's budget (the GPU is already paid for), so `parity/` never touches
+not count against your key's budget (the GPU is already paid for), so `parity/deepseek-v4.1-flash` never touches
 your quota. Anything OpenRouter answers bills at OpenRouter's real cost as usual — including
 `auto/`'s fallback, so it is free *most* of the time, not always — and because $0 models skip
 the budget check, that fallback bills you even if your key is already over budget. The pod's

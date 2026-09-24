@@ -71,7 +71,9 @@ This config drives a **live, shared production service** at `https://llm.substra
   It ships as **three aliases named `<routing>/<model-id>`** with different routing contracts:
   `auto/deepseek-v4.1-flash` (pod first, OpenRouter fallback), `parity/deepseek-v4.1-flash`
   (pod ONLY — no fallback, the hard prompts-stay-in-infra guarantee; fails fast when the pod is
-  down), and `openrouter/deepseek-v4.1-flash` (OpenRouter only). Keep the two `hosted_vllm`
+  down), and `openrouter/deepseek-v4.1-flash` (OpenRouter only). `parity/deepseek-v4-flash-scw`
+  is not the pod: it's Scaleway's hosted DeepSeek V4 Flash 0731, billed from the price map with
+  no pin, and none of the pod rules apply to it. Keep the two `hosted_vllm`
   entries' `litellm_params` in lockstep, and mind the parallel caps: they're per entry and sum to
   the pod's ~32-parallel knee (20 + 12). Changes can involve the box (tunnel account, ufw) as
   well as `config.yaml` — read `RUNBOOK.md` § I before touching any of it.

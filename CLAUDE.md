@@ -52,7 +52,9 @@ test suite — it's config, scripts, and docs.
   OpenRouter fallback) and ships as **three aliases named `<routing>/<model-id>`**:
   `auto/deepseek-v4.1-flash` (pod + fallback), `parity/deepseek-v4.1-flash` (pod ONLY — no
   fallback, the hard prompts-stay-in-infra guarantee), and `openrouter/deepseek-v4.1-flash`
-  (cloud only). Keep the two `hosted_vllm` entries in lockstep; their per-entry parallel caps sum
+  (cloud only). `parity/deepseek-v4-flash-scw` is not the pod: it's Scaleway's hosted DeepSeek
+  V4 Flash 0731, billed from the price map, so never give it a `0` pin.
+  Keep the two `hosted_vllm` entries in lockstep; their per-entry parallel caps sum
   to the pod's ~32 knee (20 + 12). Moving parts span the box (tunnel account, sshd, ufw) and
   `config.yaml` — read RUNBOOK § I before changing any of it.
 - **The model id is part of every alias's name on purpose.** Whenever the pod is redeployed
