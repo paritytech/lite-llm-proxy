@@ -48,7 +48,17 @@ on the host.
 
 ### Models
 
-Send one of these as the `"model"` field:
+Any OpenRouter model can be served: send `openrouter/<its id>`
+([details](#using-models-beyond-the-menu)).
+
+Models we self-host on Parity's GPU pod:
+
+| Model | Status | Alias |
+|---|---|---|
+| DeepSeek V4.1 Flash | Serving | `auto/deepseek-v4.1-flash`, `parity/deepseek-v4.1-flash` |
+| DeepSeek V4 Flash 0731 | Retired 2026-09-16 | none |
+
+Curated aliases (send one of these as the `"model"` field):
 
 | Alias | Upstream model |
 |---|---|
@@ -87,8 +97,7 @@ for a config change. Take the model's ID from <https://openrouter.ai/models> and
 
 Notes:
 
-- `GET /v1/models` (with your key) lists the curated aliases from the table above. Wildcard
-  models don't appear there but still work.
+- `GET /v1/models` (with your key) lists the curated aliases and every OpenRouter model.
 - **Kimi models are the exception:** the `kimi-*` aliases go directly to Moonshot, not OpenRouter,
   so only the ones in the table are available.
 - If a model is rejected with a permissions error, your key may be scoped to specific models —
