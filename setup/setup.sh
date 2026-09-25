@@ -200,16 +200,18 @@ write_omp_config() { # uses MODEL — bakes in a default so `omp` alone uses the
 # wildcard is safe; openrouter/deepseek-v4.1-flash shares its prefix with the
 # general OpenRouter wildcard, so it's matched by exact name and needs bumping
 # on the next model version (config.yaml's naming-note comment has the rule).
-claude_code_context_override() { # <model> -> prints tokens, or nothing
+context_window_override() { # <model> -> prints tokens, or nothing
   case "$1" in
     auto/*|parity/*|openrouter/deepseek-v4.1-flash)
       printf '1048576' ;;
   esac
 }
 
-# Asks the proxy for $MODEL's real context window, since Claude Code assumes
-# 200k and compacts too early for any model name it doesn't recognize.
-claude_code_max_context_tokens() { # <model> -> prints tokens, or nothing
+# Asks the proxy for $MODEL's real context window. Harnesses assume a small
+# default for any model name they don't recognize (Claude Code 200k, Codex its
+# own), and then compact far too early — Codex's compaction is worse than early,
+# see write_codex.
+model_max_context_tokens() { # <model> -> prints tokens, or nothing
   local model="$1" looked_up
   looked_up="$(curl -sf --max-time 10 "https://$BASE/model_group/info" \
     -H "Authorization: Bearer $KEY" 2>/dev/null | python3 -c '
@@ -230,14 +232,14 @@ for row in rows:
   if [ -n "$looked_up" ]; then
     printf '%s' "$looked_up"
   else
-    claude_code_context_override "$model"
+    context_window_override "$model"
   fi
 }
 
 write_claude_wrapper() { # uses BASE KEY MODEL
   backup_file "$WRAPPER"
   mkdir -p "$(dirname "$WRAPPER")" "$LLM_DIR/claude"
-  local max_context; max_context="$(claude_code_max_context_tokens "$MODEL")"
+  local max_context; max_context="$(model_max_context_tokens "$MODEL")"
   # shellcheck disable=SC2016  # $LLM_PROXY_KEY / $@ are written literally on purpose
   {
     printf '#!/bin/sh\n'
@@ -502,25 +504,50 @@ EOF
   ZED_WRITTEN=1
 }
 
+codex_set_top_key() { # <file> <key> <raw-value> — idempotent top-level key
+  local f="$1" key="$2" val="$3"
+  if grep -q "^$key *=" "$f"; then
+    sed_inplace "s|^$key *=.*|$key = $val|" "$f"
+  else
+    printf '%s = %s\n%s' "$key" "$val" "$(cat "$f")" > "$f.tmp" && mv "$f.tmp" "$f"
+  fi
+}
+
 write_codex() {
   local f="$HOME/.codex/config.toml"
   backup_file "$f"
   mkdir -p "$(dirname "$f")"
+  local max_context; max_context="$(model_max_context_tokens "$MODEL")"
   if [ -f "$f" ]; then
     # drop any previous block we wrote, then re-add
     sed_inplace "/# >>> $MARKER >>>/,/# <<< $MARKER <<</d" "$f"
-    if grep -q '^model *=' "$f"; then
-      sed_inplace "s|^model *=.*|model = \"$MODEL\"|" "$f"
-    else
-      printf 'model = "%s"\n%s' "$MODEL" "$(cat "$f")" > "$f.tmp" && mv "$f.tmp" "$f"
-    fi
-    if grep -q '^model_provider *=' "$f"; then
-      sed_inplace "s|^model_provider *=.*|model_provider = \"parity-proxy\"|" "$f"
-    else
-      printf 'model_provider = "parity-proxy"\n%s' "$(cat "$f")" > "$f.tmp" && mv "$f.tmp" "$f"
-    fi
+    codex_set_top_key "$f" model "\"$MODEL\""
+    codex_set_top_key "$f" model_provider '"parity-proxy"'
   else
     printf 'model = "%s"\nmodel_provider = "parity-proxy"\n' "$MODEL" > "$f"
+  fi
+  # Codex compacts history by calling OpenAI's /responses/compact, which LiteLLM
+  # does not implement — it 500s, and Codex surfaces that as a 400 that kills the
+  # session (hit live 2026-09-25, after ~2 min of work). Codex has no switch to
+  # disable remote compaction (openai/codex#24418) and wire_api only accepts
+  # "responses" now, so the only lever is when compaction fires: without a known
+  # context window Codex assumes a small default and compacts almost immediately.
+  # Telling it the real window, and pushing the trigger to 90% of it, moves that
+  # from minutes into sessions most people never reach. 90% because values above
+  # that are reported to be silently ignored (openai/codex#11716). A mitigation,
+  # not a fix — a long enough session still breaks until upstream lands either
+  # a local-compaction switch or LiteLLM implements /responses/compact.
+  # Both are top-level keys, so they apply to whatever model Codex is pointed at:
+  # Codex 0.157.0 dropped the two ways to scope them (`profile = "name"` is rejected
+  # outright, and profiles now need a separate file plus --profile on every run).
+  # `setup.sh cleanup` restores the original config, but someone who instead edits
+  # model/model_provider back by hand would leave a window sized for OUR model behind
+  # — hence the trailing comment naming it, so it is obvious what to change.
+  if [ -n "$max_context" ]; then
+    codex_set_top_key "$f" model_context_window \
+      "$max_context  # llm-proxy setup: window of $MODEL — change if you change model"
+    codex_set_top_key "$f" model_auto_compact_token_limit \
+      "$(( max_context * 9 / 10 ))  # llm-proxy setup: 90% of the above"
   fi
   cat >> "$f" <<EOF
 
