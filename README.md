@@ -68,7 +68,6 @@ Send one of these as the `"model"` field:
 | `auto/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — **self-hosted on Parity's own GPU** (testing), cloud fallback. **Free** when the pod answers ([details](#self-hosted-deepseek-vs-openrouter)) |
 | `parity/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — self-hosted **only**, no cloud fallback. **Free** (testing; [details](#self-hosted-deepseek-vs-openrouter)) |
 | `openrouter/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — OpenRouter **only**, never our GPU ([details](#self-hosted-deepseek-vs-openrouter)) |
-| `scaleway/deepseek-v4-flash-0731` | DeepSeek V4 Flash 0731 on Scaleway (256k context) |
 | `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
 
