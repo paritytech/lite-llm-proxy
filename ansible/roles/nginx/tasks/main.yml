@@ -1,0 +1,125 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# nginx terminates TLS on the host and proxies to the LiteLLM container on
+# 127.0.0.1:4000. The certificate comes from Let's Encrypt via certbot's WEBROOT
+# plugin, not its nginx plugin: webroot never rewrites our configuration, so the
+# template here stays the single source of truth and re-runs stay idempotent.
+---
+- name: Install nginx and certbot
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - certbot
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Ubuntu's packaged catch-all would otherwise answer on 80/443 for any name that
+# resolves here, including before our own site is enabled.
+- name: Remove the packaged default site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: ACME challenge webroot
+  ansible.builtin.file:
+    path: "{{ acme_webroot }}/.well-known/acme-challenge"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# ---------------------------------------------------------------------------
+# The site config is rendered from ONE template, twice at most.
+#
+# `nginx_tls_ready` decides whether that template emits the 443 server block. On a box
+# that has no certificate yet it renders HTTP-only (enough to answer the ACME
+# challenge), certbot then obtains the certificate, and the template is rendered
+# a second time — now with TLS. On every later run the certificate already
+# exists, the first render is the final one, and the second is skipped: the run
+# reports no changes at all.
+# ---------------------------------------------------------------------------
+- name: Look for an existing certificate
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ public_hostname }}/fullchain.pem"
+  register: nginx_cert_file
+
+- name: Note whether TLS can be configured yet
+  ansible.builtin.set_fact:
+    nginx_tls_ready: "{{ nginx_cert_file.stat.exists }}"
+
+- name: Render the site configuration
+  ansible.builtin.include_tasks: site_config.yml
+
+# certbot is idempotent by way of `creates:` — but it can also legitimately fail
+# on a box whose DNS record does not exist yet, which is a supported state for
+# this phase. So the failure is caught and explained rather than aborting the
+# run; the box is left serving HTTP, and a re-run finishes the job.
+- name: Obtain the Let's Encrypt certificate
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/certbot
+      - certonly
+      - --webroot
+      - --webroot-path={{ acme_webroot }}
+      - -d
+      - "{{ public_hostname }}"
+      - --email
+      - "{{ acme_email }}"
+      - --agree-tos
+      - --non-interactive
+    creates: "/etc/letsencrypt/live/{{ public_hostname }}/fullchain.pem"
+  register: nginx_certbot_run
+  failed_when: false
+
+- name: Explain a failed certificate request
+  ansible.builtin.fail:
+    msg: >-
+      certbot could not obtain a certificate for {{ public_hostname }}.
+      The usual cause is that its DNS record does not point at this box yet, so
+      Let's Encrypt cannot reach http://{{ public_hostname }}/.well-known/acme-challenge/.
+      nginx has been left serving HTTP only — publish the record, then re-run
+      this playbook. certbot said: {{ nginx_certbot_run.stderr | default(nginx_certbot_run.stdout) | trim }}
+  when:
+    - not nginx_tls_ready
+    - nginx_certbot_run.rc is defined
+    - nginx_certbot_run.rc != 0
+
+# The noqa is deliberate: this genuinely cannot be a handler. It must run here,
+# in the middle of the role, because the certificate only became available on
+# the previous task and the ACME-only config on disk has to be replaced before
+# the role finishes. A handler defers to the end of the play, and handlers
+# cannot include task files.
+- name: Re-render the site configuration now that TLS is available  # noqa: no-handler
+  when: nginx_certbot_run is changed
+  block:
+    - name: TLS is now available
+      ansible.builtin.set_fact:
+        nginx_tls_ready: true
+
+    - name: Render the site configuration with TLS
+      ansible.builtin.include_tasks: site_config.yml
+
+# The packaged certbot.timer renews twice daily; this hook is what makes the
+# renewed certificate take effect without anyone logging in.
+- name: Reload nginx after a certificate renewal
+  ansible.builtin.template:
+    src: reload-nginx.sh.j2
+    dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Renewal timer enabled
+  ansible.builtin.systemd_service:
+    name: certbot.timer
+    state: started
+    enabled: true
+
+- name: Nginx running and enabled at boot
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: started
+    enabled: true

@@ -1,0 +1,17 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# MANAGED BY ANSIBLE — ansible/roles/stack/templates/litellm-costmap.timer.j2
+
+[Unit]
+Description=Nightly LiteLLM price-map refresh
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# Spread the request rather than hitting GitHub's raw endpoint on the dot.
+RandomizedDelaySec=15m
+# Catch up after a reboot that spanned the scheduled time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

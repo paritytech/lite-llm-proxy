@@ -1,0 +1,29 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# What the old scripts/deploy.sh did with sha256 state files, expressed as the
+# thing Ansible does natively. Note what is absent: nothing here ever runs
+# `docker compose down`. `down -v` would delete the postgres volume, which now
+# holds the virtual keys, the budgets AND the model menu.
+---
+- name: Apply compose changes
+  ansible.builtin.command:
+    cmd: docker compose up -d --remove-orphans
+    chdir: "{{ deploy_dir }}"
+  become: true
+  become_user: "{{ admin_user }}"
+  changed_when: true
+
+# config.yaml and .env are bind-mounted / read at start, so compose sees no
+# reason to replace the container on its own.
+- name: Recreate litellm
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate litellm
+    chdir: "{{ deploy_dir }}"
+  become: true
+  become_user: "{{ admin_user }}"
+  changed_when: true
+
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true

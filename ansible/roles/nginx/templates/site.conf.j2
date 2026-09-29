@@ -1,0 +1,89 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# MANAGED BY ANSIBLE — ansible/roles/nginx/templates/site.conf.j2.
+# Edits made on the box are overwritten by the next run.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ public_hostname }};
+
+    # Kept on plain HTTP forever: Let's Encrypt renewals must reach this path
+    # without following a redirect.
+    location ^~ /.well-known/acme-challenge/ {
+        root {{ acme_webroot }};
+        default_type "text/plain";
+    }
+
+{% if nginx_tls_ready %}
+    location / {
+        return 308 https://$host$request_uri;
+    }
+{% else %}
+    # No certificate yet. Answer honestly rather than proxying LLM traffic in
+    # clear text — see ansible/roles/nginx/tasks/main.yml.
+    location / {
+        default_type text/plain;
+        return 503 "TLS not provisioned yet\n";
+    }
+{% endif %}
+}
+{% if nginx_tls_ready %}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name {{ public_hostname }};
+
+    ssl_certificate     /etc/letsencrypt/live/{{ public_hostname }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ public_hostname }}/privkey.pem;
+
+    # Written out explicitly rather than including certbot's options file, which
+    # only exists if the (unused) nginx plugin is installed.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # Six months, this host only. No includeSubDomains and no preload: this is a
+    # subdomain of a domain other teams also use, and neither flag is ours to set
+    # on their behalf.
+    add_header Strict-Transport-Security "max-age=15768000" always;
+
+    # Prompts carry base64 images and long context. The nginx default of 1m
+    # rejects those with a 413 that surfaces to users as an opaque client error.
+    client_max_body_size 100m;
+
+    access_log /var/log/nginx/{{ public_hostname }}.access.log;
+    error_log  /var/log/nginx/{{ public_hostname }}.error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Empty, not "upgrade": clears the hop-by-hop header so the upstream
+        # connection can be kept alive.
+        proxy_set_header Connection        "";
+
+        # ---- Streaming. The settings this whole file exists for. ----
+        # LiteLLM answers `"stream": true` with server-sent events. With nginx's
+        # defaults the reverse proxy buffers the whole response and hands it over
+        # in one piece, so tokens stop appearing incrementally, and the 60s
+        # read timeout severs any generation that thinks for longer than a
+        # minute. Both failures look like a flaky model rather than a proxy
+        # misconfiguration, which is what makes them expensive to diagnose.
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+    }
+}
+{% endif %}

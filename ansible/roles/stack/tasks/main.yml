@@ -1,0 +1,135 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ships the compose stack to /opt/team-llm and brings it up. The handlers below
+# are the replacement for the old scripts/deploy.sh, which tracked sha256 sums of
+# these same three files in a state file to decide what to restart — Ansible
+# already knows what it changed.
+---
+- name: Deploy directory
+  ansible.builtin.file:
+    path: "{{ deploy_dir }}"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0755"
+
+- name: Scripts directory
+  ansible.builtin.file:
+    path: "{{ deploy_dir }}/scripts"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0755"
+
+# The only file on the box containing secrets. 0600 and owned by the account
+# that runs compose; `no_log` keeps the values out of --diff and the run log.
+- name: Render .env
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ deploy_dir }}/.env"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0600"
+  no_log: true
+  notify: Recreate litellm
+
+- name: Compose file
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../docker-compose.yml"
+    dest: "{{ deploy_dir }}/docker-compose.yml"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0644"
+  notify: Apply compose changes
+
+# Bind-mounted into the container, so compose cannot see it change — which is
+# why its handler force-recreates rather than relying on `up -d`.
+- name: LiteLLM configuration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../config.yaml"
+    dest: "{{ deploy_dir }}/config.yaml"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0644"
+  notify: Recreate litellm
+
+- name: Operational scripts
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/"
+    dest: "{{ deploy_dir }}/scripts/"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0755"
+
+# Bring the stack up every run: `docker compose up -d` is a no-op when nothing
+# differs, which is what makes the changed_when below meaningful — compose
+# reports "Running" for an untouched container and "Started"/"Created"/
+# "Recreated" only when it actually did something.
+- name: Bring the stack up
+  ansible.builtin.command:
+    cmd: docker compose up -d --remove-orphans
+    chdir: "{{ deploy_dir }}"
+  become: true
+  become_user: "{{ admin_user }}"
+  register: stack_compose_up
+  changed_when: >-
+    ('Started' in stack_compose_up.stderr)
+    or ('Created' in stack_compose_up.stderr)
+    or ('Recreated' in stack_compose_up.stderr)
+
+# Nightly price-map refresh. A systemd timer rather than the crontab line the old
+# runbook installed: failures land in the journal with a unit name attached
+# instead of in root's mail spool.
+- name: Price-map refresh unit
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - litellm-costmap.service
+    - litellm-costmap.timer
+  notify: Reload systemd
+
+- name: Price-map refresh timer enabled
+  ansible.builtin.systemd_service:
+    name: litellm-costmap.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending restarts before the health gate
+  ansible.builtin.meta: flush_handlers
+
+# Two gates, in order, because they fail for different reasons. The loopback
+# check proves the containers themselves are healthy; the public check proves
+# nginx, TLS and DNS in front of them are too.
+- name: Wait for LiteLLM on the loopback port
+  ansible.builtin.uri:
+    url: http://127.0.0.1:4000/health/liveliness
+    status_code: 200
+  register: stack_local_health
+  until: stack_local_health is succeeded
+  retries: 12
+  delay: 5
+
+- name: Wait for the public endpoint
+  ansible.builtin.uri:
+    url: "https://{{ public_hostname }}/health/liveliness"
+    status_code: 200
+  register: stack_public_health
+  until: stack_public_health is succeeded
+  retries: 6
+  delay: 5
+  failed_when: false
+
+- name: Explain a failing public endpoint
+  ansible.builtin.fail:
+    msg: >-
+      LiteLLM is healthy on 127.0.0.1:4000 but https://{{ public_hostname }}/health/liveliness
+      is not answering, so the problem is in front of the containers: either DNS
+      does not point here yet or 02-nginx.yml has not obtained a certificate.
+      Run 02-nginx.yml and re-run this playbook.
+  when: stack_public_health.status | default(0) != 200

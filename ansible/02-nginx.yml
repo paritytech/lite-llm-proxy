@@ -1,0 +1,20 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Phase 2 — the front door: nginx, the site config, and a Let's Encrypt
+# certificate with automatic renewal.
+#
+# Deliberately runnable BEFORE DNS for public_hostname points at this box: the
+# certificate step is allowed to fail, says so loudly, and leaves an HTTP-only
+# site behind. Re-run once the record exists and it completes.
+#
+#   ansible-playbook 02-nginx.yml --ask-vault-pass --check --diff
+#   ansible-playbook 02-nginx.yml --ask-vault-pass
+#
+# (--ask-vault-pass is not needed by this phase itself, but group_vars loads the
+# encrypted vault for every play, so the password is still required.)
+---
+- name: Front door — nginx and TLS
+  hosts: llm_proxy
+  roles:
+    - nginx

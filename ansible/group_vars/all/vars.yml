@@ -1,0 +1,40 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Non-secret configuration. Secrets live in vault.yml (encrypted) — see
+# vault.yml.example for the list.
+---
+
+public_hostname: ai.labs.paritytech.io
+acme_email: parity-ai@parity.io
+
+admin_user: llmops
+admin_ssh_public_keys: []
+
+deploy_dir: /opt/team-llm
+acme_webroot: /var/www/letsencrypt
+
+# Upstream LLM providers -----------------------------------------------------
+# International Moonshot platform. Use https://api.moonshot.cn/v1 for China.
+moonshot_api_base: https://api.moonshot.ai/v1
+
+# LiteLLM admin UI ------------------------------------------------------------
+ui_username: admin
+
+# Self-hosted vLLM pod tunnel (04-tunnel.yml) ---------------------------------
+# The pod dials INTO this box and binds one port; these three values are what
+# the sshd policy and the ufw rule are written against. 172.17.0.1 is Docker's
+# default docker0 gateway — the one host address containers can always reach,
+# and not reachable from the internet. If the Docker daemon's default bridge
+# subnet is ever customised, this value, sshd's PermitListen and the ufw rule
+# all move together (the container side follows the daemon automatically via
+# host.docker.internal).
+vllm_tunnel_user: vllm-tunnel
+vllm_tunnel_bind: 172.17.0.1
+vllm_tunnel_port: 18000
+# PLACEHOLDER — a throwaway key nobody holds the private half of, so the tunnel
+# account exists but cannot be used until the pod operator's real key replaces
+# it. Structurally valid on purpose: sshd silently ignores a malformed
+# authorized_keys line, which would look like a working setup that never
+# accepts a connection.
+vllm_pod_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKLy5O0onzk/Lx8p7Q14PUYnud+S8ipE3WPARh6KEEaP PLACEHOLDER-replace-with-the-real-pod-key"

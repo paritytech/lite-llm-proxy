@@ -1,0 +1,43 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Template for the ENCRYPTED vault.yml sitting next to this file. Never commit a
+# plaintext vault.yml — CI rejects a vault.yml that does not start with
+# "$ANSIBLE_VAULT" precisely so that cannot happen by accident.
+#
+# Create it once:
+#   cp vault.yml.example vault.yml     # then fill in real values
+#   ansible-vault encrypt vault.yml
+# Edit it later:
+#   ansible-vault edit vault.yml
+# The vault password itself belongs in the team 1Password, not in this repo.
+#
+# Generate the three "long random" values with:  openssl rand -hex 32
+---
+# Admin master key. MUST start with "sk-". Logs into /ui and mints/revokes keys.
+litellm_master_key: sk-REPLACE_WITH_LONG_RANDOM
+
+# Encrypts what the admin UI writes into Postgres. Set ONCE — NEVER rotate on a
+# live deployment: with store_model_in_db on, rotating this destroys the model
+# menu as well as any stored provider credentials.
+litellm_salt_key: sk-REPLACE_WITH_LONG_RANDOM
+
+# Postgres password. Used both for the container and, URL-encoded, inside
+# DATABASE_URL — the template derives that, so there is only one value to keep.
+postgres_password: REPLACE_WITH_LONG_RANDOM
+
+# Upstream provider keys. Never exposed to teammates: they hold scoped virtual
+# keys minted by the proxy instead. In the admin UI, reference these by name
+# (os.environ/MOONSHOT_API_KEY, os.environ/OPENROUTER_API_KEY, …) rather than
+# pasting the values, so real credentials never land in a database row.
+moonshot_api_key: sk-REPLACE_WITH_MOONSHOT_KEY
+# Recommended: set a credit limit on this key in the OpenRouter dashboard.
+openrouter_api_key: sk-or-REPLACE_WITH_OPENROUTER_KEY
+
+# API key of the self-hosted vLLM pod. vLLM only enforces one if it was launched
+# with --api-key; if it wasn't, any non-empty value works (LiteLLM just needs the
+# variable to be set).
+vllm_api_key: REPLACE_WITH_VLLM_KEY_OR_DUMMY
+
+# Password for the /ui login (username is ui_username in vars.yml).
+ui_password: REPLACE_WITH_LONG_RANDOM

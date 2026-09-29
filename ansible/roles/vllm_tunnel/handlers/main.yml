@@ -1,0 +1,10 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+---
+# Reload, not restart: existing sessions — including the one running this
+# playbook — survive. The config was already validated with `sshd -t` by the
+# task that notified this handler, so a syntax error cannot reach here.
+- name: Reload sshd
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: reloaded

@@ -1,0 +1,164 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - ufw
+      # deb822_repository writes a deb822 sources file and needs these to manage
+      # apt state; apt_repository's python3-apt requirement is the same story.
+      - python3-apt
+      - python3-debian
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Docker from Docker's own apt repository rather than the `curl | sh`
+# convenience script the old runbook used: idempotent, and `apt upgrade` keeps
+# the engine current instead of the install being a one-shot snapshot.
+- name: Docker apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/{{ ansible_distribution | lower }}"
+    suites: ["{{ ansible_distribution_release }}"]
+    components: [stable]
+    architectures: ["{{ 'amd64' if ansible_architecture == 'x86_64' else ansible_architecture }}"]
+    signed_by: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+    state: present
+    enabled: true
+
+# update_cache here rather than as a separate conditional task: the cache has to
+# be refreshed BEFORE this install, which a handler (deferred to the end of the
+# play) could not guarantee.
+- name: Install Docker Engine and the compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Docker running and enabled at boot
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+
+# So the admin account can run `docker compose` without sudo. A user already
+# logged in must reconnect before the new group takes effect.
+- name: Admin user in the docker group
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    groups: docker
+    append: true
+
+# ---------------------------------------------------------------------------
+# SSH hardening: no root login, no passwords.
+#
+# This lives in phase 01 rather than in 00-bootstrap on purpose. 01 connects as
+# admin_user, so by the time these tasks run, the replacement account has
+# already been proven to work — root is only taken away by a playbook that did
+# not need it. Re-running is safe and re-asserts the policy.
+#
+# A drop-in IS the right mechanism here, unlike the Match block in the
+# vllm_tunnel role: Ubuntu's Include sits at the top of sshd_config, and for
+# plain (non-Match) directives OpenSSH honours the FIRST value it reads, so a
+# drop-in overrides the main file. The pitfall there was specific to Match,
+# which stays in force to end of file.
+# ---------------------------------------------------------------------------
+# Key management lives here, not in 00-bootstrap: once root login is disabled
+# bootstrap can never run again, so this is the only playbook-managed way to add
+# or remove an operator afterwards. Skipped entirely when the list is empty, so
+# the keys seeded from root during bootstrap are left alone rather than wiped.
+- name: Authorised keys for the admin account
+  ansible.builtin.copy:
+    content: "{{ admin_ssh_public_keys | join('\n') + '\n' }}"
+    dest: "/home/{{ admin_user }}/.ssh/authorized_keys"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0600"
+  when: admin_ssh_public_keys | length > 0
+
+- name: Confirm the admin account has an authorised key
+  ansible.builtin.stat:
+    path: "/home/{{ admin_user }}/.ssh/authorized_keys"
+  register: base_admin_keys_file
+
+- name: Refuse to disable password login without a key in place
+  ansible.builtin.assert:
+    that:
+      - base_admin_keys_file.stat.exists
+      - base_admin_keys_file.stat.size > 0
+    fail_msg: >-
+      /home/{{ admin_user }}/.ssh/authorized_keys is missing or empty. Disabling
+      root login and password authentication now would lock everyone out of this
+      box. Run 00-bootstrap.yml first.
+
+- name: SSH hardening drop-in
+  ansible.builtin.copy:
+    content: |
+      # Copyright (C) Parity Technologies (UK) Ltd.
+      # SPDX-License-Identifier: Apache-2.0
+      #
+      # MANAGED BY ANSIBLE — ansible/roles/base/tasks/main.yml
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PubkeyAuthentication yes
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd
+
+# Ubuntu ships a cloud-init drop-in that re-enables password authentication and
+# is included after ours. Left in place it silently reverses the line above.
+- name: Neutralise cloud-init's password-auth drop-in
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/50-cloud-init.conf
+    state: absent
+  notify: Reload sshd
+
+# ---------------------------------------------------------------------------
+# Firewall. SSH is allowed BEFORE the default-deny policy is enabled — reversing
+# these two tasks locks you out of the box.
+#
+# Unlike the previous Caddy-in-a-container setup, ufw now genuinely governs
+# 80/443: nginx is a host service, so its traffic goes through ufw's INPUT chain
+# normally. (Docker-PUBLISHED ports would bypass it — Docker's nat rules run
+# first — which is exactly why docker-compose.yml publishes LiteLLM on 127.0.0.1
+# only and Postgres not at all.)
+# ---------------------------------------------------------------------------
+- name: Allow SSH
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+
+- name: Allow HTTP and HTTPS
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "80"    # ACME http-01 challenges and the redirect to HTTPS
+    - "443"   # the service
+
+- name: Default deny incoming, allow outgoing
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
