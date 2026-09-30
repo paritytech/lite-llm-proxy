@@ -175,17 +175,19 @@ Models live in Postgres, added through the admin UI (`config.yaml` sets
 
 Two rules apply to every row and are easy to get wrong in a form field:
 
-- **Provider keys are entered as `os.environ/…` references, never pasted.** LiteLLM resolves
-  them from the container environment at call time, so real credentials stay in `.env` and
-  never land in a database row.
+- **Pick an existing credential; never paste a key.** `config.yaml` defines three named
+  credentials — `openrouter`, `moonshot`, `vllm-pod` — whose values are `os.environ/…`
+  references resolved from the container environment at call time. Selecting one in the UI
+  stores a *reference* in the database, so real credentials stay in `.env` and never land in a
+  row. A key typed directly into the form would be stored (encrypted) in Postgres instead.
 - **OpenRouter rows carry no price pin.** OpenRouter reports its real per-call cost and LiteLLM
   records it; a pin would override the truth with a guess.
 
 ### Kimi / Moonshot
 
-API key `os.environ/MOONSHOT_API_KEY`, API base `os.environ/MOONSHOT_API_BASE` on every row.
-Moonshot returns no per-call cost, so spend is price-map-only and a model too new for the map
-meters at $0 until pinned.
+Credential `moonshot` on every row (it carries both the key and the API base). Moonshot returns
+no per-call cost, so spend is price-map-only and a model too new for the map meters at $0 until
+pinned.
 
 | Public name | LiteLLM model | Price pins |
 |---|---|---|
@@ -200,7 +202,7 @@ agentic workloads. Remove each pin once LiteLLM's price map includes the model.
 
 ### OpenRouter
 
-API key `os.environ/OPENROUTER_API_KEY` on every row. No pins, ever.
+Credential `openrouter` on every row. No pins, ever.
 
 | Public name | LiteLLM model |
 |---|---|
@@ -225,8 +227,9 @@ affecting any other `openrouter/*` request.
 
 ### Self-hosted vLLM pod
 
-API base `http://host.docker.internal:18000/v1`, API key `os.environ/VLLM_API_KEY`, and an
-explicit **`0`** for both input and output cost on both rows.
+Credential `vllm-pod` on both rows — it carries the key *and* the tunnel address
+(`http://host.docker.internal:18000/v1`), so there is no API base to type. Plus an explicit
+**`0`** for both input and output cost.
 
 | Public name | LiteLLM model | Max parallel | Fallback |
 |---|---|---|---|
@@ -402,8 +405,8 @@ firewall or Docker → `01-box.yml`. Handlers restart only what changed.
 
 **Rotate a provider key.** `ansible-vault edit group_vars/all/vault.yml`, then
 `ansible-playbook 03-stack.yml`. The `.env` template change force-recreates LiteLLM. Nothing in
-Postgres needs touching, because model rows hold `os.environ/…` references rather than the
-credential.
+Postgres needs touching, because model rows reference a named credential rather than holding
+the secret.
 
 **Never rotate `LITELLM_SALT_KEY` on a live deployment.** It encrypts what the admin UI writes,
 so rotating it destroys the model menu as well as any stored credentials.

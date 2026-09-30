@@ -50,8 +50,11 @@ This config drives a **live, shared production service**. Treat changes accordin
   that are read before any database is consulted, and should stay small. `RUNBOOK.md`
   § "Model menu" is the written record of what the UI contains and what to replay after a
   database loss — **when the menu changes, that table changes in the same PR.**
-- **Provider keys are entered in the UI as `os.environ/…` references,** never pasted. The real
-  values stay in the vault-rendered `.env`, so a database dump contains no credentials.
+- **Provider credentials are named in `config.yaml`'s `credential_list`, and selected by name
+  in the UI** — never pasted into a model form. Their values are `os.environ/…` references, so
+  a model row in Postgres holds a credential name and the secret stays in the vault-rendered
+  `.env`. This is the one part of provider configuration that deliberately stays in the file:
+  it is what lets the model menu live in the database without the credentials following it.
 - **"Enable model X" requests are usually a no-op.** The `openrouter/*` wildcard already serves
   every OpenRouter model by its full ID (`openrouter/<org>/<model>`), with spend metered from
   OpenRouter's real per-call cost. A change is only needed for (a) a short curated alias or

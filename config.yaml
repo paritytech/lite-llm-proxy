@@ -2,6 +2,36 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 #
+# Named credentials, selectable in the admin UI when adding a model. This is how
+# the model menu lives in the database while the secrets do not: a model row
+# references a credential by name, and the actual values resolve from the
+# container environment (.env, rendered by Ansible from the vault) at call time.
+# Adding a credential here needs a 03-stack.yml run; picking one is a UI action.
+credential_list:
+  - credential_name: openrouter
+    credential_values:
+      api_key: os.environ/OPENROUTER_API_KEY
+    credential_info:
+      description: "OpenRouter — all openrouter/* models and curated aliases"
+
+  - credential_name: moonshot
+    credential_values:
+      api_key: os.environ/MOONSHOT_API_KEY
+      api_base: os.environ/MOONSHOT_API_BASE
+    credential_info:
+      description: "Kimi / Moonshot — the kimi-* aliases"
+
+  # api_base belongs on the credential rather than each model row: both pod
+  # aliases reach the GPU pod through the same reverse SSH tunnel, so the
+  # address has one home. host.docker.internal is the docker0 gateway, where
+  # sshd binds the tunnel (see docker-compose.yml extra_hosts).
+  - credential_name: vllm-pod
+    credential_values:
+      api_key: os.environ/VLLM_API_KEY
+      api_base: http://host.docker.internal:18000/v1
+    credential_info:
+      description: "Self-hosted vLLM GPU pod — auto/ and parity/ aliases"
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL

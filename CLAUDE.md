@@ -44,6 +44,10 @@ Parity's own vLLM GPU pod over a reverse SSH tunnel. It drives a **live producti
   action; `config.yaml` holds only what is read before the database is consulted, and should
   stay small. `RUNBOOK.md` § "Model menu" is its written record — when the menu changes, that
   table changes in the same PR.
+- **Provider credentials stay in `config.yaml`'s `credential_list`** as `os.environ/…`
+  references, and models select one by name in the UI. Never suggest pasting a provider key
+  into a model form: that stores it (encrypted) in Postgres, where the whole point is that it
+  isn't. Adding a credential needs a `03-stack.yml` run; picking one is a UI action.
 - When asked about LLM models, pricing, or limits, don't answer from memory — `RUNBOOK.md`
   § "Model menu" and the `claude-api` skill are the sources of truth for this repo's menu.
 - **"Enable model X" is usually a no-op:** the `openrouter/*` wildcard already serves any

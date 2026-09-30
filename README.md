@@ -270,9 +270,10 @@ internet ──80/443──> nginx (host, certbot) ──> 127.0.0.1:4000 ──
 
 - **Admin UI:** `https://ai.labs.paritytech.io/ui` (log in with `UI_USERNAME`/`UI_PASSWORD` from
   the vault; the master key also works).
-- **Add or change a model:** Models → Add Model in the UI. Enter the provider key as
-  `os.environ/OPENROUTER_API_KEY` (or the Moonshot/vLLM equivalent) rather than pasting the
-  secret, so credentials stay in `.env` and never land in a database row.
+- **Add or change a model:** Models → Add Model in the UI, selecting one of the named
+  credentials (`openrouter`, `moonshot`, `vllm-pod`) rather than pasting a key. Those are
+  defined in `config.yaml` as `os.environ/…` references, so credentials stay in `.env` and
+  never land in a database row.
 - **Mint a key:** `POST /key/generate` with `models`, `max_budget`, `budget_duration`, `rpm_limit`,
   `user_id`. Omit `models` (or pass `["all-proxy-models"]`) to allow every model above.
 - **Revoke a key:** `POST /key/delete`.
@@ -311,9 +312,10 @@ See `RUNBOOK.md` for the full mint → use → track → revoke walkthrough.
 - **No plaintext secrets in this repo.** They live in `ansible/group_vars/all/vault.yml`,
   encrypted with `ansible-vault`; the vault password is in the team password manager. CI
   rejects a vault file that isn't encrypted. The host's `.env` is rendered from it at 0600.
-- **Upstream keys never leave the server.** Teammates only ever hold their own scoped virtual
-  keys. In the admin UI, provider keys are entered as `os.environ/…` references, so the
-  credentials are not in the database either.
+- **Upstream keys never leave the server, or reach the database.** Teammates only ever hold
+  their own scoped virtual keys. Models added in the admin UI reference a named credential
+  from `config.yaml`, whose values are `os.environ/…` references — so a database dump contains
+  credential *names*, not secrets.
 - **No deploy credentials anywhere.** There is no CI key with access to the box; deployment is
   an operator running a playbook over their own SSH access.
 - **SSH:** key authentication only. Root login and password authentication are disabled by
