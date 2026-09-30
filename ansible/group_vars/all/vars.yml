@@ -37,4 +37,4 @@ vllm_tunnel_port: 18000
 # it. Structurally valid on purpose: sshd silently ignores a malformed
 # authorized_keys line, which would look like a working setup that never
 # accepts a connection.
-vllm_pod_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKLy5O0onzk/Lx8p7Q14PUYnud+S8ipE3WPARh6KEEaP PLACEHOLDER-replace-with-the-real-pod-key"
+vllm_pod_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINa8ePgYvefiohzwWIuCwQbUft+oMTOgy/1z9yUzF3iW vllm"
