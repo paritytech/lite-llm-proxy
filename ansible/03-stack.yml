@@ -1,0 +1,20 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Phase 3 — the containers: /opt/team-llm, the rendered .env, LiteLLM + Postgres,
+# and the nightly price-map refresh timer.
+#
+# Assumes phases 1 and 2 have run (Docker present, nginx terminating TLS). The
+# final health gate hits the PUBLIC URL, so a failure here usually means phase 2
+# has not completed its certificate yet.
+#
+#   ansible-playbook 03-stack.yml --ask-vault-pass --check --diff
+#   ansible-playbook 03-stack.yml --ask-vault-pass
+#
+# Note --check is of limited use on first run: the compose and health tasks are
+# skipped because the files they depend on do not exist yet.
+---
+- name: Stack — LiteLLM and Postgres
+  hosts: llm_proxy
+  roles:
+    - stack

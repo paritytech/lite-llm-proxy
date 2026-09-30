@@ -1,0 +1,17 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Phase 4 — the reverse SSH tunnel the self-hosted vLLM pod dials in over.
+# Optional: skip it entirely and the pod-backed model entries simply have no
+# backend (auto/ falls back to OpenRouter, parity/ fails fast).
+#
+# This phase edits sshd configuration. It validates before reloading, but keep
+# your current SSH session open and prove a NEW login works before closing it.
+#
+#   ansible-playbook 04-tunnel.yml --ask-vault-pass --check --diff
+#   ansible-playbook 04-tunnel.yml --ask-vault-pass
+---
+- name: Tunnel for the self-hosted vLLM pod — account, sshd policy, firewall
+  hosts: llm_proxy
+  roles:
+    - vllm_tunnel

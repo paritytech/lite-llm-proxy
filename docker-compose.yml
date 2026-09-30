@@ -2,135 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: team-llm
-
 services:
-  caddy:
-    image: caddy:2.8
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      # Chat UI (Open WebUI) — same hostname on an alternate TLS port, because a
-      # new DNS label isn't ours to create (Caddyfile comment has the full story).
-      - "8443:8443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - litellm
-      - openwebui
-    networks: [internal]
-
   litellm:
-    image: ghcr.io/berriai/litellm-database:v1.97.0   # PINNED — latest stable confirmed 2026-08-19 (v1.96.0+ fixes BerriAI/litellm#33224)
+    image: ghcr.io/berriai/litellm-database:v1.100.3   # PINNED — never latest/main-latest (breaking changes ship in releases)
     restart: unless-stopped
     env_file: [.env]
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-    # Self-hosted vLLM backend (config.yaml deepseek-flash + -parity): the GPU pod's reverse
-    # SSH tunnel lands on the HOST at 172.17.0.1:18000 (docker0 gateway — the one host
-    # IP containers can always reach; the host's 127.0.0.1 is invisible to them).
-    # host-gateway resolves to that same gateway IP, so the container reaches the
-    # tunnel as http://host.docker.internal:18000. Setup + topology: RUNBOOK § I.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["--config", "/app/config.yaml", "--port", "4000"]
-    expose:
-      - "4000"
+    ports:
+      - "127.0.0.1:4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
-    networks: [internal]
-
-  # ---- Open WebUI (hosted chat frontend, https://llm.substrate.dev:8443) ----
-  # Browser chat over the same proxy (README "Chat UI"). Ships with ONE server-side
-  # connection to LiteLLM over the internal network, authed by a shared,
-  # budget-capped virtual key (OPENWEBUI_SHARED_KEY in .env — mint per RUNBOOK § J).
-  # Users who want their own budget add a personal Direct Connection to
-  # https://llm.substrate.dev/v1 with their own key instead (browser → proxy
-  # directly; this container never sees personal keys).
-  # Deliberately NO env_file: .env holds upstream provider secrets (Moonshot,
-  # OpenRouter, master key) that this container must never see — it gets exactly
-  # the variables below and nothing else.
-  openwebui:
-    image: ghcr.io/open-webui/open-webui:v0.11.3   # PINNED — latest stable confirmed 2026-09-03
-    restart: unless-stopped
-    environment:
-      # Shared default connection: LiteLLM over the compose network. The key is
-      # the budget-capped "openwebui-shared" virtual key — NEVER the master key.
-      # Default-empty so a box whose .env predates this service still deploys
-      # cleanly (the default connection just stays dead until the key is added).
-      OPENAI_API_BASE_URL: http://litellm:4000/v1
-      OPENAI_API_KEY: ${OPENWEBUI_SHARED_KEY:-}
-      # This deployment is OpenAI-API-only; don't probe for a local Ollama.
-      ENABLE_OLLAMA_API: "false"
-      # Stamp each proxied request with the signed-in user
-      # (X-OpenWebUI-User-Id/-Email/-Name/-Role) so LiteLLM can attribute
-      # shared-key spend per person — consumed in config.yaml
-      # (user_header_mappings + extra_spend_tag_headers).
-      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
-      # Let users add a personal connection (their own proxy key = their own
-      # budget) under Settings → Connections.
-      ENABLE_DIRECT_CONNECTIONS: "true"
-      # New signups land role-less ("pending", no access) until an admin approves
-      # them — that's the access gate. The FIRST account created becomes admin —
-      # claim it the moment the first deploy goes green (RUNBOOK § J step 1; the
-      # race is real, and ENABLE_SIGNUP=false would NOT close it — upstream
-      # exempts the first admin from that gate).
-      DEFAULT_USER_ROLE: pending
-      # Keep signup OPEN — explicitly. Upstream auto-disables signup the moment
-      # the first admin account is created (observed live 2026-09-03; the
-      # v0.11.3 source comments on this auto-disable), which would silently
-      # break our access model: open signup → lands "pending" → admin approves.
-      # The pending role is the gate here, not closed signup.
-      ENABLE_SIGNUP: "true"
-      # The UI admin canNOT read users' chat histories (upstream default allows
-      # it). Proxy-side request logging (README "Logging & privacy") is the one,
-      # documented visibility surface — don't grow a second, undocumented one.
-      ENABLE_ADMIN_CHAT_ACCESS: "false"
-      # Pin the session-signing secret INTO the data volume. Upstream generates
-      # it at /app/backend/.webui_secret_key (outside the volume), so without
-      # this every recreate — image bump, key rotation — would regenerate it and
-      # log every user out.
-      WEBUI_SECRET_KEY_FILE: /app/backend/data/.webui_secret_key
-      # Keep env the single source of truth, matching this repo's config-as-code
-      # model: without this, Open WebUI copies env values into its DB on first
-      # boot and ignores env changes afterwards. Flip settings HERE, not in the
-      # admin UI — UI-made settings changes do not survive a recreate.
-      ENABLE_PERSISTENT_CONFIG: "false"
-      WEBUI_URL: https://llm.substrate.dev:8443
-    volumes:
-      # Accounts, chat history (SQLite), and the session-signing secret (pinned
-      # here by WEBUI_SECRET_KEY_FILE above). NOT covered by the nightly pg_dump
-      # — see the backup note in RUNBOOK § J.
-      - openwebui_data:/app/backend/data
-    expose:
-      - "8080"
-    depends_on:
-      - litellm
-    networks: [internal]
-
-  # ---- PII scrub pair (used only by scripts/export-logs.sh) ----
-  # Behind the `scrub` compose profile so a plain `docker compose up -d` does
-  # NOT start them: the analyzer's NLP model holds ~1.5 GB RAM, so the nightly
-  # export brings them up for the few minutes it runs and stops them after.
-  # Ports bind to localhost only — the scrub script talks to them from the
-  # host; nothing else should be able to.
-  presidio-analyzer:
-    image: mcr.microsoft.com/presidio-analyzer:2.2.362   # PINNED — latest that EXISTS on MCR, confirmed 2026-08-05 (2.2.364 was a bad pin: tag never published)
-    profiles: [scrub]
-    restart: "no"
-    ports:
-      - "127.0.0.1:5002:3000"
-    networks: [internal]
-
-  presidio-anonymizer:
-    image: mcr.microsoft.com/presidio-anonymizer:2.2.362   # PINNED — keep in lockstep with the analyzer
-    profiles: [scrub]
-    restart: "no"
-    ports:
-      - "127.0.0.1:5001:3000"
     networks: [internal]
 
   postgres:
@@ -150,10 +36,7 @@ services:
     networks: [internal]
 
 volumes:
-  caddy_data:
-  caddy_config:
   postgres_data:
-  openwebui_data:
 
 networks:
   internal:

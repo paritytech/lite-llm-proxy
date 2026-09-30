@@ -1,0 +1,82 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runs as root, exactly once, on a fresh box. Everything here is about handing
+# control over to admin_user so that nothing afterwards needs root SSH.
+---
+- name: Read root's authorised keys
+  ansible.builtin.slurp:
+    src: /root/.ssh/authorized_keys
+  register: bootstrap_root_authorized_keys
+  # A box reached by console or password may legitimately have none.
+  failed_when: false
+
+# Explicit list if one was given, otherwise whatever let you in as root — on a
+# freshly provisioned box that is your own key.
+- name: Decide which keys the admin account gets
+  ansible.builtin.set_fact:
+    bootstrap_admin_keys: >-
+      {{ admin_ssh_public_keys if admin_ssh_public_keys | length > 0
+         else (bootstrap_root_authorized_keys.content | default('') | b64decode).splitlines()
+              | map('trim') | reject('match', '^\s*(#|$)') | list }}
+
+# Without this the play would hand over an account nobody can log into, and the
+# next phase — which disables root — would lock everyone out of the box.
+- name: Refuse to continue without a key for the admin account
+  ansible.builtin.assert:
+    that: bootstrap_admin_keys | length > 0
+    fail_msg: >-
+      No SSH public key available for {{ admin_user }}: root's authorized_keys is
+      empty or unreadable, and admin_ssh_public_keys is unset. Set
+      admin_ssh_public_keys in ansible/group_vars/all/vars.yml to your own public
+      key before running this play — otherwise 01-box.yml would disable root
+      login on a box with no other way in.
+
+- name: Admin account
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    groups: sudo
+    append: true
+    shell: /bin/bash
+    create_home: true
+    # Key authentication only. A locked password cannot be used to log in or to
+    # sudo, which is why the sudoers rule below has to be NOPASSWD.
+    password: "!"
+    password_lock: true
+
+- name: Admin .ssh directory
+  ansible.builtin.file:
+    path: "/home/{{ admin_user }}/.ssh"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0700"
+
+- name: Admin authorised keys
+  ansible.builtin.copy:
+    content: "{{ bootstrap_admin_keys | join('\n') + '\n' }}"
+    dest: "/home/{{ admin_user }}/.ssh/authorized_keys"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0600"
+
+# Passwordless because the account has no password to type: Ansible's `become`
+# would otherwise need a sudo password passed on every run. `validate` means a
+# malformed rule is rejected rather than written — a broken file in sudoers.d
+# breaks sudo for everyone.
+- name: Passwordless sudo for the admin account
+  ansible.builtin.copy:
+    content: "{{ admin_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/90-{{ admin_user }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: What to do next
+  ansible.builtin.debug:
+    msg:
+      - "Admin account '{{ admin_user }}' is ready with {{ bootstrap_admin_keys | length }} key(s)."
+      - "Prove it works before going further:"
+      - "  ssh {{ admin_user }}@{{ ansible_host | default(inventory_hostname) }} sudo -n true"
+      - "Then run 01-box.yml, which disables root SSH login and password auth."

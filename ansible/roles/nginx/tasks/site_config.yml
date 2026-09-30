@@ -1,0 +1,38 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Included from main.yml, once or twice per run — see the comment there.
+---
+- name: Site configuration
+  ansible.builtin.template:
+    src: site.conf.j2
+    dest: "/etc/nginx/sites-available/{{ public_hostname }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Site enabled
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ public_hostname }}.conf"
+    dest: "/etc/nginx/sites-enabled/{{ public_hostname }}.conf"
+    state: link
+  notify: Reload nginx
+
+# Validated here rather than with the template's `validate:` option, because a
+# site file is a bare `server {}` fragment: `nginx -t -c <fragment>` rejects it
+# outright, since server blocks are only legal inside `http {}`. It has to be
+# checked as part of the whole configuration, which means after it is linked in.
+#
+# A failure here aborts the play BEFORE the reload below, so nginx carries on
+# serving its previously loaded configuration — the broken file sits on disk but
+# never takes effect.
+- name: Validate the complete nginx configuration
+  ansible.builtin.command: /usr/sbin/nginx -t
+  changed_when: false
+
+# The reload has to happen inside this file rather than at the end of the play:
+# the certbot task that follows the first render needs nginx already serving the
+# ACME challenge location.
+- name: Apply pending nginx changes
+  ansible.builtin.meta: flush_handlers

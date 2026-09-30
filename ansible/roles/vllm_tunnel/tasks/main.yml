@@ -1,0 +1,98 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The self-hosted vLLM GPU pod has no stable public address — it gets a new IP
+# every relaunch — so it dials INTO this box instead and publishes its local
+# vLLM port here over a reverse SSH tunnel:
+#
+#   pod:127.0.0.1:9001  --ssh -R-->  box:{{ vllm_tunnel_bind }}:{{ vllm_tunnel_port }}
+#                                          (docker0 gateway)
+#                                              ^
+#                                              | http://host.docker.internal:18000
+#                                         litellm container
+#
+# Everything here exists to make that one port binding the ONLY thing the pod's
+# key can ever do on this machine.
+---
+- name: Tunnel account
+  ansible.builtin.user:
+    name: "{{ vllm_tunnel_user }}"
+    system: true
+    # No shell: this account exists to hold a port binding, not to be used.
+    shell: /usr/sbin/nologin
+    home: "/home/{{ vllm_tunnel_user }}"
+    create_home: true
+    comment: Reverse tunnel for the self-hosted vLLM pod
+
+- name: Tunnel account .ssh directory
+  ansible.builtin.file:
+    path: "/home/{{ vllm_tunnel_user }}/.ssh"
+    state: directory
+    owner: "{{ vllm_tunnel_user }}"
+    group: "{{ vllm_tunnel_user }}"
+    mode: "0700"
+
+# Templated rather than managed with authorized_key, because the option prefix
+# is the security control here and it has to be exact.
+- name: Authorised key for the pod
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "/home/{{ vllm_tunnel_user }}/.ssh/authorized_keys"
+    owner: "{{ vllm_tunnel_user }}"
+    group: "{{ vllm_tunnel_user }}"
+    mode: "0600"
+
+# APPENDED TO THE MAIN sshd_config, NOT a sshd_config.d drop-in, and that is not
+# a style preference: Ubuntu places its Include for drop-ins at the TOP of the
+# main file, and a Match block stays in force until the next Match or end of
+# FILE. A Match in a drop-in would therefore swallow the entire main config
+# below the Include and apply it to every connection. The end of the main file
+# is the one place where "until EOF" means what it looks like it means.
+- name: SSH daemon policy for the tunnel account
+  ansible.builtin.blockinfile:
+    path: /etc/ssh/sshd_config
+    marker: "# {mark} ANSIBLE MANAGED — vllm tunnel"
+    insertafter: EOF
+    block: |
+      Match User {{ vllm_tunnel_user }}
+          # Remote (-R) forwarding only, narrowed to the single bind address and
+          # port below. PermitOpen none closes local (-L) forwarding, which the
+          # authorized_keys "port-forwarding" option would otherwise re-enable
+          # along with the remote kind.
+          AllowTcpForwarding remote
+          PermitOpen none
+          PermitListen {{ vllm_tunnel_bind }}:{{ vllm_tunnel_port }}
+          AllowAgentForwarding no
+          X11Forwarding no
+          PermitTTY no
+          ForceCommand /usr/sbin/nologin
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd
+
+# ufw's default-deny also governs CONTAINER -> HOST traffic, and its deny is a
+# silent DROP rather than a reject. Without this rule the litellm container's
+# SYNs to the tunnel vanish, so connections hang out a long client timeout
+# instead of failing fast — which breaks the live tunnel AND the instant
+# OpenRouter fallback that is supposed to cover the pod being down. This was hit
+# in production on 2026-08-12: auto/deepseek requests hung rather than falling
+# back. Scoped to Docker's private ranges and this one address:port; none of it
+# is reachable from the internet either way.
+- name: Allow Docker containers to reach the tunnel
+  community.general.ufw:
+    rule: allow
+    direction: in
+    proto: tcp
+    src: 172.16.0.0/12
+    dest: "{{ vllm_tunnel_bind }}"
+    port: "{{ vllm_tunnel_port }}"
+    comment: litellm container -> vLLM pod reverse tunnel
+
+- name: Remind the operator what the pod side still needs
+  ansible.builtin.debug:
+    msg:
+      - "Box side is ready. The pod operator still needs, from RUNBOOK § vLLM pod:"
+      - "  1. this box's SSH host key, to pin"
+      - "  2. autossh -M 0 -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=15"
+      - "     -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes"
+      - "     -R {{ vllm_tunnel_bind }}:{{ vllm_tunnel_port }}:127.0.0.1:9001 {{ vllm_tunnel_user }}@{{ public_hostname }}"
+      - "Verify afterwards with: ss -lntp | grep {{ vllm_tunnel_port }}"

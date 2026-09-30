@@ -1,0 +1,27 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Everything except the bootstrap, in order.
+#
+#   ansible-playbook site.yml --ask-vault-pass
+#
+# 00-bootstrap.yml is NOT imported here: it is the only play that connects as
+# root, it is meant to run exactly once, and 01 disables root login afterwards.
+# Including it would make site.yml fail on every subsequent run.
+#
+# On a genuinely new box, prefer running the phases one at a time anyway: DNS
+# for public_hostname has to point here before 02 can obtain a certificate, and
+# the pod operator has to hand over a public key before 04 is useful. site.yml
+# is for the case where all of that is already true.
+---
+- name: Team LLM Proxy — full rebuild
+  ansible.builtin.import_playbook: 01-box.yml
+
+- name: Team LLM Proxy — front door
+  ansible.builtin.import_playbook: 02-nginx.yml
+
+- name: Team LLM Proxy — stack
+  ansible.builtin.import_playbook: 03-stack.yml
+
+- name: Team LLM Proxy — vLLM tunnel
+  ansible.builtin.import_playbook: 04-tunnel.yml

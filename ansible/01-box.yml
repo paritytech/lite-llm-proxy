@@ -1,0 +1,17 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Phase 1 — the machine itself: base packages, Docker, SSH hardening, firewall.
+#
+# Connects as the admin account created by 00-bootstrap.yml, and disables root
+# SSH login and password authentication. Running it successfully is therefore
+# the proof that the admin account works; root is never shut off by a play that
+# depended on root. Safe to re-run.
+#
+#   ansible-playbook 01-box.yml --check --diff     # dry run
+#   ansible-playbook 01-box.yml
+---
+- name: Box — packages, Docker, firewall
+  hosts: llm_proxy
+  roles:
+    - base

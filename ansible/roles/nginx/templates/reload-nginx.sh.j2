@@ -1,0 +1,12 @@
+#!/bin/sh
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# MANAGED BY ANSIBLE — ansible/roles/nginx/templates/reload-nginx.sh.j2.
+#
+# certbot deploy hook: runs after a successful renewal, which is the only moment
+# the certificate on disk changes without anyone being logged in. Without it the
+# renewed certificate sits unused until the next reload and the service starts
+# serving an expired one.
+set -eu
+systemctl reload nginx

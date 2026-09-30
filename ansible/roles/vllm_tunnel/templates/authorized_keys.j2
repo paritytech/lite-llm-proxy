@@ -1,0 +1,16 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# MANAGED BY ANSIBLE — ansible/roles/vllm_tunnel/templates/authorized_keys.j2
+#
+# restrict         turns everything off, including forwarding, and keeps doing so
+#                  as new capabilities are added to OpenSSH in future releases.
+# port-forwarding  turns forwarding back on — but BOTH kinds; the sshd Match
+#                  block's "PermitOpen none" is what closes local forwarding again.
+# permitlisten     narrows remote forwarding to this one address and port.
+#
+# Kill switch: comment out the key line below (or clear vllm_pod_pubkey and
+# re-run), then `pkill -u {{ vllm_tunnel_user }}`.
+{% if vllm_pod_pubkey | default('') | trim %}
+restrict,port-forwarding,permitlisten="{{ vllm_tunnel_bind }}:{{ vllm_tunnel_port }}" {{ vllm_pod_pubkey }}
+{% endif %}

@@ -6,28 +6,20 @@ DeepSeek, Llama, … ~400+ models), and **Parity's own self-hosted GPU serving**
 [LiteLLM](https://docs.litellm.ai) proxy. One OpenAI-compatible API over HTTPS, gated by
 per-user virtual keys with individual budgets and usage tracking.
 
-- **Base URL:** `https://llm.substrate.dev`
+- **Base URL:** `https://ai.labs.paritytech.io`
 - **Auth:** your personal virtual key (`sk-...`), issued by the admin. Keep it secret; it carries your budget.
-- **Chat in the browser:** `llm.substrate.dev/chat` — a hosted [chat UI](#chat-ui-open-webui);
-  sign up, get approved, chat. No key required to start. (That address is a shortcut that
-  redirects to the real home, `https://llm.substrate.dev:8443`.)
 
-> **Connect your coding harness (Claude Code, OpenCode, Codex, Pi, …) in ~5 minutes →
-> [`setup/`](setup/README.md)** — a one-command installer plus per-tool guides.
-
-This repository is the **deployment definition** for that service: the Docker Compose stack,
-reverse-proxy and proxy config, operational scripts, runbook, and the teammate setup guides in
-`setup/`. No application source code and **no secrets** live here — the real `.env` exists only
-on the host.
+This repository is the **deployment definition** for that service: the Ansible playbooks that
+build the machine, the Docker Compose stack, the proxy config, and the runbook. No application
+source code and **no plaintext secrets** live here — the real `.env` is rendered on the host
+from an encrypted vault.
 
 ---
 
 ## Contents
 
 - [For teammates — using the proxy](#for-teammates--using-the-proxy)
-  - [Harness setup guides](setup/README.md) (in `setup/`)
   - [Models](#models)
-  - [Chat UI (Open WebUI)](#chat-ui-open-webui)
   - [From code (OpenAI SDK)](#from-code-openai-sdk)
   - [From the shell / CI](#from-the-shell--ci)
   - [Budgets & limits](#budgets--limits)
@@ -37,7 +29,6 @@ on the host.
   - [Repository layout](#repository-layout)
   - [Deploy & operate](#deploy--operate)
   - [Admin tasks](#admin-tasks)
-  - [Request logging & training corpus](#request-logging--training-corpus)
   - [How pricing stays accurate](#how-pricing-stays-accurate)
 - [Security model](#security-model)
 - [License](#license)
@@ -75,8 +66,8 @@ Curated aliases (send one of these as the `"model"` field):
 | `deepseek` | DeepSeek V3.2 |
 | `deepseek-r1` | DeepSeek R1 (reasoning) |
 | `deepseek-v4-pro` | DeepSeek V4 Pro |
-| `auto/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — **self-hosted on Parity's own GPU** (testing), cloud fallback. **Free** when the pod answers ([details](#self-hosted-deepseek-vs-openrouter)) |
-| `parity/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — self-hosted **only**, no cloud fallback. **Free** (testing; [details](#self-hosted-deepseek-vs-openrouter)) |
+| `auto/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — **self-hosted on Parity's own GPU**, cloud fallback once configured. **Free** when the pod answers ([details](#self-hosted-deepseek-vs-openrouter)) |
+| `parity/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — self-hosted **only**, no cloud fallback. **Free** ([details](#self-hosted-deepseek-vs-openrouter)) |
 | `openrouter/deepseek-v4.1-flash` | DeepSeek V4.1 Flash — OpenRouter **only**, never our GPU ([details](#self-hosted-deepseek-vs-openrouter)) |
 | `minimax-m3` | MiniMax M3 |
 | `llama-4-maverick` | Meta Llama 4 Maverick |
@@ -107,12 +98,12 @@ Notes:
   OpenRouter](#self-hosted-deepseek-vs-openrouter) just below. Requests the pod answers
   are **free**: they record $0 spend and don't count against your key's budget.
 - Spend tracking on OpenRouter models — aliases and wildcard alike — uses OpenRouter's real
-  per-call cost, **streamed calls included** (verified on our deployment 2026-08-12: recorded
-  spend matches OpenRouter's reported cost exactly). Budgets enforce on that recorded spend.
+  per-call cost, **streamed calls included** (verified 2026-08-12: recorded spend matches
+  OpenRouter's reported cost exactly). Budgets enforce on that recorded spend.
 
-**Using a model regularly?** Ask the admin (or open a PR) to add it as a named alias in
-`config.yaml` — that gives it a short name and puts it in the menu above. That's how
-`deepseek-v4-pro` and `minimax-m3` were added.
+**Using a model regularly?** Ask the admin to add it as a named alias — that gives it a short
+name and puts it in the menu above. That's how `deepseek-v4-pro` and `minimax-m3` were added.
+It is a one-minute change in the admin UI, not a code change.
 
 #### Self-hosted DeepSeek vs OpenRouter
 
@@ -122,62 +113,40 @@ the request is allowed to run:
 
 | Alias | Where it runs | When to use it |
 |---|---|---|
-| `auto/deepseek-v4.1-flash` | Parity GPU first; falls back to OpenRouter if the pod is down or saturated | Default — always answers |
+| `auto/deepseek-v4.1-flash` | Parity GPU, with an OpenRouter fallback for when the pod is down or saturated | Default — the one that keeps answering |
 | `parity/deepseek-v4.1-flash` | Parity GPU **only** — errors fast if the pod is unavailable | Prompts that must never leave Parity infra; testing the pod itself |
 | `openrouter/deepseek-v4.1-flash` | OpenRouter **only** — never touches the pod | Comparing pod vs cloud; deliberately bypassing the pod |
 
+> **Current state:** the fallback on `auto/` is **not configured yet** — it is set up in the
+> admin UI as a rollout step. Until it is, `auto/deepseek-v4.1-flash` behaves exactly like
+> `parity/`: it errors instead of falling back when the pod is unavailable. Use it when you
+> want the fallback behaviour to apply automatically once it is switched on.
+
 The model id is part of the name on purpose: when the pod moves to a new model version, a new
-set of three aliases is added for it and this set is retired (a stale alias fails loudly rather
-than silently answering with a different model — see `config.yaml`'s naming-note comment for
-the exact rule).
+set of three aliases is added for it and this set is retired, so a stale alias fails loudly
+rather than silently answering with a different model.
 
 Privacy is the point of the split: requests served by the pod stay entirely on our
-infrastructure, while anything served by OpenRouter follows the normal cloud path. That means
-`auto/`'s fallback *can* send your prompt to OpenRouter — if that must never happen, use
-`parity/deepseek-v4.1-flash` and be prepared to handle an error while the pod is down.
+infrastructure, while anything served by OpenRouter follows the normal cloud path. Once the
+fallback is enabled, `auto/` *can* send your prompt to OpenRouter — if that must never happen,
+use `parity/deepseek-v4.1-flash` and be prepared to handle an error while the pod is down.
+`parity/` carries the hard guarantee; `auto/`'s is a soft one by design.
 
 Cost follows the same line. Anything the pod answers is **free** — it is logged at $0 and does
-not count against your key's budget (the GPU is already paid for), so `parity/deepseek-v4.1-flash` never touches
-your quota. Anything OpenRouter answers bills at OpenRouter's real cost as usual — including
-`auto/`'s fallback, so it is free *most* of the time, not always — and because $0 models skip
-the budget check, that fallback bills you even if your key is already over budget. The pod's
-capacity, not your budget, is the limit: it serves a bounded number of requests at once, so
-under heavy use expect slower answers rather than budget errors.
-
-### Chat UI (Open WebUI)
-
-Prefer a browser over an SDK or harness? The proxy has a hosted
-[Open WebUI](https://github.com/open-webui/open-webui) chat frontend. Just type
-**`llm.substrate.dev/chat`** — it redirects to the UI's real home,
-`https://llm.substrate.dev:8443` (same host as the API, alternate port; no separate domain to
-remember):
-
-- **Sign up** with your work email. New accounts start as *pending* — ping the admin to be
-  approved (one-time).
-- Once approved, chat away: the default model menu rides a **shared, budget-capped key** — a
-  fair-use pool for casual use. If the pool's monthly budget runs dry, the default models pause
-  for everyone until it resets.
-- **Want your own budget instead?** Add your personal proxy key: **Settings → Connections →
-  + Add Connection**, URL `https://llm.substrate.dev/v1`, key `sk-YOUR-KEY`. Its models join
-  your model picker, and spend lands on *your* budget exactly like API usage. This "direct
-  connection" goes straight from your browser to the proxy — your key stays in your browser,
-  never on the chat server.
-- **Logging:** chats reach the models through this same proxy, so [Logging &
-  privacy](#logging--privacy) applies in full — prompts and responses are logged to the
-  training corpus, whether you use the shared pool or your own key. The per-request
-  `"no-log"` flag isn't settable from the chat UI; if you need an always-opt-out key, ask
-  the admin. (The chat *server's* admin panel cannot read your conversations — admin chat
-  access is disabled; the proxy-side logging above is the one visibility surface.)
-- **On a strict network?** Some corporate/guest Wi-Fi blocks outbound ports beyond 80/443 —
-  if `:8443` won't load there, it's the network, not an outage. Use a different network or
-  the API.
+not count against your key's budget (the GPU is already paid for), so `parity/deepseek-v4.1-flash`
+never touches your quota. Anything OpenRouter answers bills at OpenRouter's real cost as usual,
+which will include `auto/`'s fallback once it exists — so `auto/` is free *most* of the time,
+not always. Because $0 models skip the budget check, that fallback will bill you even if your
+key is already over budget. The pod's capacity, not your budget, is the limit: it serves a
+bounded number of requests at once, so under heavy use expect slower answers rather than
+budget errors.
 
 ### From code (OpenAI SDK)
 
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="https://llm.substrate.dev", api_key="sk-YOUR-KEY")
+client = OpenAI(base_url="https://ai.labs.paritytech.io", api_key="sk-YOUR-KEY")
 resp = client.chat.completions.create(
     model="claude-sonnet",   # or kimi-k2, gpt-5, gemini-pro, ...
     messages=[{"role": "user", "content": "Hello!"}],
@@ -185,10 +154,13 @@ resp = client.chat.completions.create(
 print(resp.choices[0].message.content)
 ```
 
+Any OpenAI-compatible tool works the same way: point its base URL at
+`https://ai.labs.paritytech.io/v1`, give it your key, and use one of the model names above.
+
 ### From the shell / CI
 
 ```bash
-curl https://llm.substrate.dev/v1/chat/completions \
+curl https://ai.labs.paritytech.io/v1/chat/completions \
   -H "Authorization: Bearer $LLM_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"kimi-k2","messages":[{"role":"user","content":"Hello!"}]}'
@@ -203,66 +175,28 @@ requests are rejected until the 30-day window resets. Ask the admin to raise it 
 The exception is our own GPU: requests the self-hosted pod answers (`auto/deepseek-v4.1-flash`
 when the pod serves it, and `parity/deepseek-v4.1-flash` always) are metered at **$0**, so they
 never consume your budget — only the rpm cap applies to them. They also keep working after you
-have hit your budget, because LiteLLM skips the budget check for $0 models. One catch:
-`auto/deepseek-v4.1-flash` falls back to OpenRouter while the pod is down, and that fallback is
-billed to your key even when it is already over budget — use `parity/deepseek-v4.1-flash` if
-that matters to you.
+have hit your budget, because LiteLLM skips the budget check for $0 models. One catch, once the
+fallback on `auto/deepseek-v4.1-flash` is enabled: it routes to OpenRouter while the pod is
+down, and that fallback is billed to your key even when it is already over budget — use
+`parity/deepseek-v4.1-flash` if that matters to you.
 
 ### Logging & privacy
 
-**Your full prompts and responses are logged.** The proxy stores every request/response body,
-which we use to build a training corpus for internal AI models. Concretely:
+**Prompts and responses are not stored.** The proxy records only what it needs to meter and
+operate the service: which model you called, token counts, spend, duration, and whether the
+call succeeded. Message content is never written to disk.
 
-- Recent requests (≤90 days) are browsable by admins in the proxy UI (per-request drill-down).
-  These rows are attributed (your email / key alias) so admins can debug and handle
-  erasure requests — and they are auto-deleted after 90 days.
-- A nightly job exports the day's requests to a compressed archive kept indefinitely on the
-  server, as training data. **The archive is de-identified before it's written:** your email,
-  key alias, key hash, and IP are never exported (timestamps are reduced to the day),
-  prompt/response text is scrubbed — emails, names, phone numbers, and credential-shaped
-  strings are replaced with `<PLACEHOLDER>` tokens — and any images, audio, or files in
-  requests or responses are dropped from the archive entirely. Conversations keep their shape: the turns
-  of one session stay grouped and ordered under a random-looking session code (a salted
-  hash — your raw session id is never exported, and nothing links two of your sessions to
-  each other or to you).
+Concretely, per request the proxy keeps the model name, prompt/completion/total token counts,
+computed cost, latency, status, and the key that made the call. Those rows are visible to
+admins in the proxy UI and are auto-deleted after 90 days.
 
-**Honesty note:** de-identification is pseudonymization, not anonymity. Free text can still
-identify you to a colleague ("my PR on the XCM refactor…" narrows it down fast in a team this
-size). Write prompts accordingly, or use the opt-out below.
+Two things this does *not* protect you from, and they are worth saying plainly:
 
-**Don't paste secrets into prompts.** The scrubber catches common key formats as a backstop,
-but it is a backstop — secrets would still sit in the 90-day hot store, and no detector is
-perfect. (This is a good rule with any LLM provider, ours included.)
-
-**Opting out per request:** send `"no-log": true` in the request body and that request's message
-content is excluded from logging. With the OpenAI SDK:
-
-```python
-resp = client.chat.completions.create(
-    model="claude-sonnet",
-    messages=[{"role": "user", "content": "..."}],
-    extra_body={"no-log": True},
-)
-```
-
-Spend/budget accounting still happens for opted-out requests — only the message content is
-excluded. If you want an always-opt-out key instead of per-request flags, ask the admin.
-
-**Grouping your session (optional, helps the corpus):** requests carry no session identity by
-default — each one becomes a standalone entry. If you pass a `litellm_session_id` (any opaque
-string, same value for every turn of one conversation), the archive keeps those turns grouped
-and ordered, which makes much better training data:
-
-```python
-resp = client.chat.completions.create(
-    model="claude-sonnet",
-    messages=[...],
-    extra_body={"litellm_session_id": my_conversation_uuid},
-)
-```
-
-Use a random UUID per conversation — don't put your name or ticket ids in it (the raw value
-stays in the 90-day admin store; only a salted hash of it reaches the archive).
+- **Upstream providers still see your prompts.** Moonshot and OpenRouter receive the full
+  request and apply their own retention policies. The one exception is the self-hosted pod:
+  `parity/deepseek-v4.1-flash` never leaves Parity infrastructure (see
+  [above](#self-hosted-deepseek-vs-openrouter)).
+- **Don't paste secrets into prompts.** Good practice with any LLM provider, ours included.
 
 ---
 
@@ -270,198 +204,139 @@ stays in the 90-day admin store; only a salted hash of it reaches the archive).
 
 ### Architecture
 
-One `docker compose` stack. Four always-on containers on a private Docker network; only Caddy
-publishes host ports. (Two more — the Presidio PII-scrub pair — sit behind the `scrub` compose
-profile, started by the nightly export for a few minutes and bound to localhost only.)
+nginx terminates TLS on the host and proxies to a two-container compose stack. Nothing in the
+stack is reachable from the internet; LiteLLM is published on loopback only.
 
 ```
-internet ──443/80──> caddy ──┬──> litellm:4000 ──> postgres:5432
-         └──8443──── (TLS)   │     (proxy)          (keys / budgets / usage / logs)
-                             │        │
-                             │        └──> 172.17.0.1:18000 ←─(reverse SSH tunnel)── vLLM GPU pod
-                             │             (host, container-reachable only)          (auto/, parity/)
-                             └──> openwebui:8080 ──> litellm:4000
-                                   (chat UI, :8443)   (shared budget-capped key)
+internet ──80/443──> nginx (host, certbot) ──> 127.0.0.1:4000 ──> litellm ──> postgres
+                                                                    │        (keys / budgets /
+                                                                    │         spend / models)
+                                                                    └──> 172.17.0.1:18000
+                                                                         ↑ reverse SSH tunnel
+                                                                         └── vLLM GPU pod
 ```
 
-- **caddy** — reverse proxy + automatic Let's Encrypt TLS. The only container exposing ports (80, 443, 8443).
-- **litellm** — the proxy itself, on a **pinned image tag** (never `latest` — LiteLLM ships breaking
-  changes). Listens on 4000 on the internal network only.
-- **openwebui** — the hosted chat frontend at `https://llm.substrate.dev:8443` (pinned image tag,
-  like litellm). Same hostname as the API on an alternate TLS port — deliberate: creating a new
-  DNS label needs an external grant, a port doesn't (and Open WebUI can't be served under a
-  path — see the `Caddyfile` comment). Talks to LiteLLM over the internal network with a shared
-  budget-capped virtual key;
-  users' personal "direct connections" go browser → `llm.substrate.dev` and never touch this
-  container. Accounts and chat history live in its own named volume (`openwebui_data`) — **not**
-  covered by the nightly Postgres dump (see `RUNBOOK.md` § J).
-- **postgres** — virtual keys, budgets, per-key spend, request logs. Persisted in a named volume,
-  never published to the host.
-- **vLLM GPU pod** (not part of the compose stack) — Parity's self-hosted backend for our
+- **nginx** — a host service, not a container. Terminates TLS with a Let's Encrypt certificate
+  obtained and renewed by certbot, and proxies everything to LiteLLM. Configured for streaming:
+  response buffering off and a 15-minute read timeout, because LLM responses are server-sent
+  events that can run for minutes.
+- **litellm** — the proxy itself, on a **pinned image tag** (never `latest` — LiteLLM ships
+  breaking changes). Published on `127.0.0.1:4000` so only nginx can reach it.
+- **postgres** — virtual keys, budgets, per-key spend, request metadata, **and the model menu**
+  (see [Deploy & operate](#deploy--operate)). Persisted in a named volume, never published.
+- **vLLM GPU pod** (not part of the compose stack) — Parity's self-hosted backend for the
   DeepSeek Flash aliases ([paritytech/vllm-parity](https://github.com/paritytech/vllm-parity),
   rented GPU). It has no stable public address, so it dials **into** the box over a restricted
   SSH account and reverse-binds `172.17.0.1:18000` (docker0 gateway — reachable by containers,
-  not the internet). When the pod is down or saturated, LiteLLM falls back to OpenRouter
-  automatically for `auto/deepseek-v4.1-flash` — but not for `parity/deepseek-v4.1-flash`, which
-  fails fast by design (see [the models section](#self-hosted-deepseek-vs-openrouter)).
-  Topology, setup,
-  and ops: `RUNBOOK.md` § I.
+  not the internet). `auto/deepseek-v4.1-flash` is the alias that carries an OpenRouter
+  fallback for when the pod is down or saturated — configured in the admin UI, and not yet
+  switched on; `parity/deepseek-v4.1-flash` never gets one, and fails fast by design.
+  Topology, setup, and ops: `RUNBOOK.md`.
 
 ### Repository layout
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | The four-container stack (caddy + litellm + openwebui + postgres). |
-| `Caddyfile` | TLS + reverse-proxy config. Site labels = the public URLs (API + chat UI). |
-| `config.yaml` | LiteLLM model list (Kimi + OpenRouter aliases + wildcard) and settings. |
-| `.env.example` | Template for the real `.env` (secrets) that lives only on the host. |
-| `scripts/backup.sh` | Nightly `pg_dump` of the LiteLLM database, verified and pruned. |
-| `scripts/reload-costmap.sh` | Refresh LiteLLM's price map from upstream (no restart). |
-| `scripts/export-logs.sh` | Nightly export of request logs (incl. prompts) to gzipped JSONL — the training corpus. De-identifies on the way out: identity-column whitelist + PII scrub. |
-| `scripts/scrub-logs.py` | JSONL filter used by the export: replaces PII/credentials in prompt/response text with placeholders via the local Presidio containers. Fail-closed. |
-| `scripts/deploy.sh` | Change-aware deploy step CI runs on the box — restarts only what the merge touched. |
-| `scripts/deploy-gatekeeper.sh` | SSH forced command pinning the CI deploy key to rsync + deploy only. |
-| `.github/workflows/validate.yml` | CI: YAML parses, shellcheck, SPDX headers, no secrets committed. |
-| `.github/workflows/deploy.yml` | Auto-deploys every merge to `main` to the box (manual trigger available). |
-| `setup/` | Teammate-facing harness setup: one-command installer (`setup.sh`) + per-tool guides (`harnesses/`). |
-| `RUNBOOK.md` | Step-by-step provisioning, deploy, key lifecycle, and DNS cutover. |
-| `SPEC.md` | The original design and rationale (background reference). |
+| `ansible/00-bootstrap.yml` | One-shot, connects as root: creates the admin account. |
+| `ansible/01-box.yml` | Packages, Docker, SSH hardening, firewall. |
+| `ansible/02-nginx.yml` | nginx, the site config, Let's Encrypt and auto-renewal. |
+| `ansible/03-stack.yml` | `/opt/team-llm`, the rendered `.env`, compose up, health gate. |
+| `ansible/04-tunnel.yml` | The vLLM pod's restricted SSH account and firewall rule. |
+| `ansible/site.yml` | Phases 01–04 in order. |
+| `ansible/group_vars/all/vars.yml` | Public hostname, admin user, pod key — all non-secret config. |
+| `ansible/group_vars/all/vault.yml` | Encrypted secrets (`ansible-vault`). `.example` alongside lists them. |
+| `docker-compose.yml` | The two-container stack (litellm + postgres). |
+| `config.yaml` | The LiteLLM settings that cannot live in the admin UI. Deliberately small. |
+| `scripts/reload-costmap.sh` | Nightly price-map refresh, run by a systemd timer. |
+| `.github/workflows/validate.yml` | CI: YAML parses, playbooks lint, shellcheck, SPDX, no secrets. |
+| `RUNBOOK.md` | Rebuild from zero, the model menu, key lifecycle, pod ops. |
 
 ### Deploy & operate
 
 `RUNBOOK.md` is the authoritative, copy-pasteable guide. In short:
 
-1. The host runs the stack from `/opt/team-llm`; the repo is rsync'd there (excluding `.env`).
-2. Secrets are generated and written to `/opt/team-llm/.env` (chmod 600) — **never committed**.
-3. `docker compose up -d` brings up Caddy (which auto-issues the Let's Encrypt certs), LiteLLM, Open WebUI, and Postgres.
-4. Nightly crons run the backup and price-map refresh.
-
-**Merging a PR to `main` deploys it.** GitHub Actions (`deploy.yml`) rsyncs the repo to the box
-and restarts only what the change touched — a `config.yaml` merge recreates LiteLLM, a
-`Caddyfile` merge reloads Caddy gracefully, a docs-only merge restarts nothing. Re-deploys can
-be triggered manually from the Actions tab. Setup and security model: `RUNBOOK.md` § H.
-
-To change models or settings: edit `config.yaml`, open a PR, merge — CI does the rest.
+1. **The machine is Ansible's.** `ansible-playbook site.yml` takes a bootstrapped Ubuntu host to
+   a serving proxy, and is safe to re-run — a second run should report no changes.
+2. **Merging a PR deploys nothing.** There is no CI deploy path and no deploy credentials in
+   this repo. A merged change reaches the box when an operator runs the relevant playbook.
+3. **The model menu lives in the admin UI**, stored in Postgres (`store_model_in_db: true`), not
+   in `config.yaml`. Adding a model is a UI action. `RUNBOOK.md` § "Model menu" is the written
+   record of what the UI should contain, and the thing to replay if the database is ever lost.
+4. **Secrets live in `ansible/group_vars/all/vault.yml`**, encrypted with `ansible-vault`. The
+   host's `.env` is rendered from it; editing `.env` on the box is pointless, because the next
+   playbook run overwrites it.
 
 ### Admin tasks
 
-- **Admin UI:** `https://llm.substrate.dev/ui` (log in with `UI_USERNAME`/`UI_PASSWORD` from the
-  host `.env`; the master key also works).
+- **Admin UI:** `https://ai.labs.paritytech.io/ui` (log in with `UI_USERNAME`/`UI_PASSWORD` from
+  the vault; the master key also works).
+- **Add or change a model:** Models → Add Model in the UI, selecting one of the named
+  credentials (`openrouter`, `moonshot`, `vllm-pod`) rather than pasting a key. Those are
+  defined in `config.yaml` as `os.environ/…` references, so credentials stay in `.env` and
+  never land in a database row.
 - **Mint a key:** `POST /key/generate` with `models`, `max_budget`, `budget_duration`, `rpm_limit`,
   `user_id`. Omit `models` (or pass `["all-proxy-models"]`) to allow every model above.
 - **Revoke a key:** `POST /key/delete`.
 - **Usage:** `GET /key/info?key=...` or the UI.
-- **Request logs:** the UI's **Logs** page shows per-request drill-down, including full
-  prompt/response bodies (last ~90 days).
-- **Chat UI users:** approve pending signups in Open WebUI's own admin panel
-  (`https://llm.substrate.dev:8443` → Admin Panel → Users; the first-ever account is the admin).
-  Shared-key minting, budget, and per-user attribution checks: `RUNBOOK.md` § J.
+- **Request logs:** the UI's **Logs** page shows per-request metadata for the last ~90 days.
+  There are no prompt or response bodies to show — see
+  [Logging & privacy](#logging--privacy).
 
-See `RUNBOOK.md` § D for the full mint → use → track → revoke walkthrough.
-
-### Request logging & training corpus
-
-Full request/response bodies are captured to build a training corpus (teammate-facing details
-and the opt-out are in [Logging & privacy](#logging--privacy) above). The data flow:
-
-```
-request ──> litellm ──> Postgres LiteLLM_SpendLogs   (hot store: ATTRIBUTED rows, auto-pruned
-                              │                       after 90d, browsable in /ui Logs)
-                              └─ nightly export-logs.sh
-                                   ├─ column whitelist  (drops email/key/team/IP ids;
-                                   │                     timestamps coarsened to the day;
-                                   │                     session id → salted hash + turn no.)
-                                   ├─ scrub-logs.py     (PII/credentials in prompt+response text
-                                   │                     → <PLACEHOLDER>, via local Presidio)
-                                   └──> $LOG_EXPORT_DIR/spendlogs-<date>.jsonl.gz
-                                        (durable corpus: DE-IDENTIFIED, kept forever by default)
-```
-
-- **Capture** is `store_prompts_in_spend_logs: true` in `config.yaml`.
-- **Postgres retention** is `maximum_spend_logs_retention_period: "90d"` in `config.yaml` —
-  LiteLLM auto-deletes older rows daily, bounding DB growth. Pruning loses nothing: the export
-  runs nightly, long before rows age out. The 90-day attributed hot store is also the safety
-  window: if the scrubber ever misbehaves, fix it and re-run `export-logs.sh <date>` for any
-  day still inside the window.
-- **De-identification happens at export time**, the last point before data becomes permanent.
-  The export SELECT is an explicit column *whitelist* (a new LiteLLM column stays out of the
-  corpus until consciously added); text scrubbing runs against the Presidio pair in the `scrub`
-  compose profile, on-box only, and **fails closed** — a scrub error aborts the export rather
-  than writing raw text. Each run logs a `scrub summary:` line with per-entity mask counts to
-  the cron log; a sudden spike means detector false positives — investigate while re-export is
-  still possible. This yields a *pseudonymized* corpus, not an anonymous one (free text can
-  still identify authors in a small team) — README's teammate section says so explicitly.
-- **The corpus** is one gzipped JSONL file per UTC day, written by `scripts/export-logs.sh`
-  (cron). Location `LOG_EXPORT_DIR` and optional pruning `LOG_EXPORT_RETENTION_DAYS` are set in
-  the host `.env` — retarget to a mounted datastore by changing one line. Corpus retention is
-  indefinite by design (collecting until a training pipeline exists), with an annual review
-  date — see RUNBOOK § G.
-- **Durability:** the corpus is a plain host directory (outside Docker) and Postgres lives in the
-  `postgres_data` named volume — both survive reboots, `docker compose up -d` redeploys, and
-  image bumps. Never run `docker compose down -v` (`-v` deletes the volumes).
-- **Sizing** (20 engineers): moderate use ≈ 360 MB/day raw → ~70 MB/day gzipped ≈ 26 GB/year of
-  corpus + ~32 GB of Postgres at 90d retention. Heavy agentic use ≈ 3 GB/day raw → ~600 MB/day
-  gzipped ≈ 220 GB/year; at that rate drop the Postgres retention to 30d and plan corpus off-box
-  archival after ~a year. The export cron logs `df -h` nightly so growth is visible in
-  `logs/export.log`.
+See `RUNBOOK.md` for the full mint → use → track → revoke walkthrough.
 
 ### How pricing stays accurate
 
-- **OpenRouter** returns the real per-call cost; LiteLLM records it directly — **streaming
+- **OpenRouter** returns the real per-call cost and LiteLLM records it directly — **streaming
   included** since the v1.95.0 image (upstream fix PR #32255 for
-  [BerriAI/litellm#16021](https://github.com/BerriAI/litellm/issues/16021); our previous
-  v1.90.0 pin dropped inline cost on streamed calls). Verified on this deployment 2026-08-12
-  (`RUNBOOK.md` § "Pricing model"), after which the temporary list-price pins on curated
-  aliases came off — the real cost wins. OpenRouter aliases must stay **pin-free**: a pin
-  overrides the real per-call cost.
-- **Kimi / Moonshot** does not return cost, so spend comes from LiteLLM's price map, which is
-  fetched from upstream at startup and refreshed daily by `scripts/reload-costmap.sh`. A model too
-  new for the map needs a temporary price pin in `config.yaml` — including
+  [BerriAI/litellm#16021](https://github.com/BerriAI/litellm/issues/16021)). Verified on this
+  deployment 2026-08-12, after which the temporary list-price pins came off. OpenRouter entries
+  must stay **pin-free**: a pin overrides the real per-call cost.
+- **Kimi / Moonshot** does not return cost, so spend comes from LiteLLM's price map, fetched
+  from upstream at startup and refreshed daily by `scripts/reload-costmap.sh`. A model too new
+  for the map needs a temporary price pin on its UI entry — including
   `cache_read_input_token_cost`, or cached tokens get metered at the full input price.
-- **Self-hosted pod (the `auto/`- and `parity/`-prefixed pod entries)** returns no cost either,
-  and is pinned to an explicit **$0** in `config.yaml` — pod tokens are free to teammates and
-  don't touch key budgets. The pin must stay a literal `0` rather than be removed: to LiteLLM an
-  absent price means "look up the price map", which has no entry for the pod's served model, and
-  a request whose cost can't be computed is dropped from the spend logs entirely. A side effect
-  of $0 pricing is that LiteLLM skips the budget check for these aliases, so over-budget keys can
-  still use them. The OpenRouter fallback on `auto/deepseek-v4.1-flash` is unaffected — cost is
-  computed from the deployment that actually answered, so fallback calls bill OpenRouter's real
-  cost, even for a key that is already over budget.
-- **Wildcard caveat (fixed since the v1.95.0 image, verified on-box 2026-08-12):** an `openrouter/*`
-  model with no map entry used to meter **$0** on *streaming* requests (a wildcard can't carry a
-  pin). Upstream fixed this in v1.94.0 (provider-reported stream cost) and our spot-check
-  confirmed it — streamed spend equals OpenRouter's reported cost. The OpenRouter key's own
-  credit limit stays on as defense-in-depth.
+- **Self-hosted pod (the `auto/` and `parity/` entries)** returns no cost either and is pinned
+  to an explicit **$0** — pod tokens are free to teammates and don't touch key budgets. The pin
+  must be a literal `0` rather than absent: to LiteLLM an absent price means "look up the price
+  map", which has no entry for the pod's served model, and a request whose cost can't be
+  computed is dropped from the spend logs entirely. A side effect of $0 pricing is that LiteLLM
+  skips the budget check for these aliases, so over-budget keys can still use them. A fallback
+  on `auto/deepseek-v4.1-flash` would be unaffected by the $0 pin — cost is computed from the
+  deployment that actually answered, so fallback calls bill OpenRouter's real cost even for a
+  key that is already over budget.
 
 ---
 
 ## Security model
 
-- **No secrets in this repo.** The real `.env` (master key, salt key, Postgres password, upstream
-  Moonshot and OpenRouter keys, the chat UI's shared key) lives only on the host, chmod 600, and
-  is git-ignored.
-- **Upstream keys never leave the server.** Teammates only ever hold their own scoped virtual keys.
-- **The chat UI container is least-privilege.** It receives exactly one secret — the shared,
-  budget-capped virtual key — never the master key or upstream provider keys (no `env_file`; an
-  explicit allowlist of variables). Personal keys added as "direct connections" stay in the
-  user's browser and go straight to the proxy.
-- **Network:** the internet reaches exactly ports 22 (host sshd, gated by `ufw`) and 80/443/8443
-  (published by the Caddy container; 8443 is the chat UI, TLS like 443). For the published
-  ports, what governs exposure is compose's `ports:` section — Docker's nat rules act before
-  `ufw`'s INPUT chain, so the matching `ufw allow` rules are defense-in-depth, not the gate.
-  LiteLLM (4000), Open WebUI (8080), and Postgres (5432) are *not published* and stay
-  unreachable on the internal Docker network. The vLLM tunnel port (18000) binds to the docker0
-  gateway address only — an internal ufw rule lets containers reach it; nothing external can.
-- **The vLLM pod's SSH access is caged.** The pod logs in as `vllm-tunnel`: no shell (`nologin`),
-  `restrict,port-forwarding` in `authorized_keys`, and an sshd `Match` block that allows exactly
-  one reverse bind (`172.17.0.1:18000`) — no local forwards, no pty, no agent/X11. Kill switch and
-  details: `RUNBOOK.md` § I.
-- **TLS everywhere** via Caddy + Let's Encrypt.
-- **`LITELLM_SALT_KEY` must not be rotated after launch** — it encrypts provider keys stored in the
-  DB, and rotating it invalidates them.
-- **Request logs contain teammates' prompts** — treat the Postgres volume and `LOG_EXPORT_DIR`
-  as sensitive. Log access = admin access (`/ui` login or shell on the box); the corpus never
-  leaves the server unless deliberately copied for training.
+- **No plaintext secrets in this repo.** They live in `ansible/group_vars/all/vault.yml`,
+  encrypted with `ansible-vault`; the vault password is in the team password manager. CI
+  rejects a vault file that isn't encrypted. The host's `.env` is rendered from it at 0600.
+- **Upstream keys never leave the server, or reach the database.** Teammates only ever hold
+  their own scoped virtual keys. Models added in the admin UI reference a named credential
+  from `config.yaml`, whose values are `os.environ/…` references — so a database dump contains
+  credential *names*, not secrets.
+- **No deploy credentials anywhere.** There is no CI key with access to the box; deployment is
+  an operator running a playbook over their own SSH access.
+- **SSH:** key authentication only. Root login and password authentication are disabled by
+  `01-box.yml`, which can only run as the admin account — so the account that replaces root is
+  proven working before root is taken away.
+- **Network:** the internet reaches exactly ports 22, 80 and 443, all host services gated by
+  `ufw`. LiteLLM is published on `127.0.0.1` only and Postgres is not published at all, so
+  neither is reachable from outside regardless of the firewall. The vLLM tunnel port (18000)
+  binds to the docker0 gateway address only — an internal ufw rule lets containers reach it;
+  nothing external can.
+- **The vLLM pod's SSH access is caged.** The pod logs in as `vllm-tunnel`: no shell
+  (`nologin`), `restrict,port-forwarding,permitlisten=…` in `authorized_keys`, and an sshd
+  `Match` block allowing exactly one reverse bind (`172.17.0.1:18000`) — no local forwards, no
+  pty, no agent/X11. Kill switch and details: `RUNBOOK.md`.
+- **TLS** via nginx + Let's Encrypt, renewed automatically by `certbot.timer` with a deploy
+  hook that reloads nginx.
+- **`LITELLM_SALT_KEY` must not be rotated on a live deployment** — it encrypts what the admin
+  UI writes to Postgres, so rotating it destroys the model menu along with any stored
+  credentials.
+- **Request logs contain no prompt or response text**, so the Postgres volume is sensitive as
+  key and budget material rather than as conversation data.
 
 ---
 

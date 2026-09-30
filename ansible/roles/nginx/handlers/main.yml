@@ -1,0 +1,9 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+---
+# Reload, never restart: a reload finishes in-flight requests, and an LLM
+# request in flight can be a multi-minute stream.
+- name: Reload nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded

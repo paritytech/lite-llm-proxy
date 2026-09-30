@@ -1,0 +1,18 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+---
+# The tree passes "production" as written, so that is the bar it is held to — a
+# lower setting would only let it drift. If a future rule here proves genuinely
+# wrong for this repo, add it to skip_list with a reason rather than lowering
+# the profile wholesale.
+profile: production
+
+exclude_paths:
+  # Ciphertext: the linter cannot parse it, and there is nothing to lint.
+  - group_vars/all/vault.yml
+
+skip_list:
+  # docker compose is driven through `command` deliberately — see the note in
+  # roles/stack. The alternative, community.docker, would put the `docker`
+  # Python library on the box for no benefit.
+  - command-instead-of-module
