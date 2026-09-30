@@ -32,9 +32,8 @@ ui_username: admin
 vllm_tunnel_user: vllm-tunnel
 vllm_tunnel_bind: 172.17.0.1
 vllm_tunnel_port: 18000
-# PLACEHOLDER — a throwaway key nobody holds the private half of, so the tunnel
-# account exists but cannot be used until the pod operator's real key replaces
-# it. Structurally valid on purpose: sshd silently ignores a malformed
-# authorized_keys line, which would look like a working setup that never
-# accepts a connection.
+# The GPU pod's public key, from its operator. This is the pod authenticating
+# itself TO us; the reverse direction — the pod verifying this box — is the
+# box's SSH host key, which the operator pins in the pod's known_hosts.
+# Kill switch: blank this and re-run 04-tunnel.yml, then `pkill -u vllm-tunnel`.
 vllm_pod_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINa8ePgYvefiohzwWIuCwQbUft+oMTOgy/1z9yUzF3iW vllm"
