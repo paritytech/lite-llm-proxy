@@ -38,10 +38,15 @@ general_settings:
   store_model_in_db: true
   maximum_spend_logs_retention_period: "90d"
   maximum_spend_logs_retention_interval: "1d"
-  add_user_information_to_llm_headers: true
+
+  # Pass the caller's own headers through to the upstream provider.
+  forward_client_headers_to_llm_api: true
 
 litellm_settings:
   drop_params: true
+
+  # Stamp requests to the provider with the calling key's user/team info.
+  add_user_information_to_llm_headers: true
 
   # No fallbacks
   # fallbacks:
