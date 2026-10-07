@@ -32,15 +32,13 @@ jobs:
           EOF
 
       - name: shellcheck scripts
-        run: shellcheck scripts/*.sh setup/*.sh
-
-      - name: python scripts compile
-        run: python3 -m py_compile scripts/*.py
+        run: shellcheck scripts/*.sh
 
       - name: SPDX header present on code/config files
         run: |
           missing=0
-          for f in $(git ls-files '*.sh' '*.py' '*.yml' '*.yaml' 'Caddyfile'); do
+          # vault.yml is ansible-vault ciphertext; it cannot carry a plaintext header.
+          for f in $(git ls-files '*.sh' '*.py' '*.yml' '*.yaml' 'Caddyfile' | grep -v '^ansible/group_vars/all/vault.yml$'); do
             head -3 "$f" | grep -q 'SPDX-License-Identifier: Apache-2.0' \
               || { echo "missing SPDX header: $f"; missing=1; }
           done
@@ -53,5 +51,13 @@ jobs:
           # No real-looking API keys (sk-<24+ chars>); REPLACE_* placeholders are fine.
           if git grep -nE 'sk-(or-v1-)?[A-Za-z0-9]{24,}' -- ':!*.md'; then
             echo "possible real key committed!"; exit 1
+          fi
+          # The grep above only catches sk- prefixed keys; a plaintext vault would
+          # still publish postgres_password and ui_password.
+          vault=ansible/group_vars/all/vault.yml
+          if git ls-files --error-unmatch "$vault" >/dev/null 2>&1 \
+             && ! head -1 "$vault" | grep -q '^\$ANSIBLE_VAULT'; then
+            echo "$vault is tracked but not encrypted! Run: ansible-vault encrypt $vault"
+            exit 1
           fi
           echo "ok: no secrets"

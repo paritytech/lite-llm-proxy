@@ -1,0 +1,32 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Phase 0 — the one play that connects as root. Creates the admin account every
+# later phase uses, gives it your SSH key and passwordless sudo, and stops.
+#
+#   ansible-playbook 00-bootstrap.yml --ask-vault-pass
+#
+# Run this ONCE on a freshly provisioned box, then never again: 01-box.yml
+# disables root SSH login, which deliberately makes this play unrunnable
+# afterwards. That ordering is the safety mechanism — root is only shut off by a
+# playbook that had to connect as the admin user to run at all, so the new
+# account is proven working before the old one is taken away.
+#
+# On a brand-new box you will need to accept its SSH host key first (ansible.cfg
+# keeps host key checking on):
+#   ssh-keyscan -H 51.159.116.128 >> ~/.ssh/known_hosts
+# Verify the fingerprint against your provider's console before trusting it.
+---
+- name: Bootstrap — admin account
+  hosts: llm_proxy
+  vars:
+    # Overrides ansible_user from the inventory, for this play only. It has to
+    # be a play var rather than the `remote_user:` keyword: an inventory
+    # ansible_user outranks remote_user, so the keyword would silently lose and
+    # the play would try to connect as the account it is about to create.
+    ansible_user: root
+  # Already root, so there is nothing to escalate — and this avoids depending on
+  # sudo being present and configured on a freshly imaged host.
+  become: false
+  roles:
+    - bootstrap

@@ -1,0 +1,18 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# MANAGED BY ANSIBLE — ansible/roles/stack/templates/litellm-costmap.service.j2
+
+[Unit]
+Description=Refresh LiteLLM's model price map
+Documentation=https://github.com/paritytech/lite-llm-proxy
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Runs as the account that owns /opt/team-llm: the script reads the master key
+# out of the 0600 .env, which root does not need to be involved in.
+User={{ admin_user }}
+WorkingDirectory={{ deploy_dir }}
+ExecStart={{ deploy_dir }}/scripts/reload-costmap.sh
