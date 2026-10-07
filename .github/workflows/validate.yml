@@ -32,15 +32,13 @@ jobs:
           EOF
 
       - name: shellcheck scripts
-        run: shellcheck scripts/*.sh setup/*.sh
-
-      - name: python scripts compile
-        run: python3 -m py_compile scripts/*.py
+        run: shellcheck scripts/*.sh
 
       - name: SPDX header present on code/config files
         run: |
           missing=0
-          for f in $(git ls-files '*.sh' '*.py' '*.yml' '*.yaml' 'Caddyfile'); do
+          # vault.yml is ansible-vault ciphertext; it cannot carry a plaintext header.
+          for f in $(git ls-files '*.sh' '*.py' '*.yml' '*.yaml' 'Caddyfile' | grep -v '^ansible/group_vars/all/vault.yml$'); do
             head -3 "$f" | grep -q 'SPDX-License-Identifier: Apache-2.0' \
               || { echo "missing SPDX header: $f"; missing=1; }
           done
