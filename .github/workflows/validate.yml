@@ -52,4 +52,12 @@ jobs:
           if git grep -nE 'sk-(or-v1-)?[A-Za-z0-9]{24,}' -- ':!*.md'; then
             echo "possible real key committed!"; exit 1
           fi
+          # The grep above only catches sk- prefixed keys; a plaintext vault would
+          # still publish postgres_password and ui_password.
+          vault=ansible/group_vars/all/vault.yml
+          if git ls-files --error-unmatch "$vault" >/dev/null 2>&1 \
+             && ! head -1 "$vault" | grep -q '^\$ANSIBLE_VAULT'; then
+            echo "$vault is tracked but not encrypted! Run: ansible-vault encrypt $vault"
+            exit 1
+          fi
           echo "ok: no secrets"
