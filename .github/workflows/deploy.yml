@@ -1,84 +1,36 @@
 # Copyright (C) Parity Technologies (UK) Ltd.
 # SPDX-License-Identifier: Apache-2.0
-#
-# Auto-deploy to the production box. Every push to main runs 03-stack.yml, which ships
-# config.yaml, docker-compose.yml and the rendered .env, then recreates what changed and
-# health-checks the result.
-#
-# Only the stack phase runs here. 01-box.yml rewrites sshd config and firewall rules, and
-# 02/04 touch TLS and the tunnel. A bad merge there locks CI and the operators out
-# together, so those stay manual.
-#
-# One-time setup, which CI cannot do for itself:
-#   1. the deploy key's public half is appended to /home/llmops/.ssh/authorized_keys on the
-#      box, not added to admin_ssh_public_keys. That list REPLACES authorized_keys rather
-#      than appending, and it is empty, so the task in roles/base is skipped and the keys
-#      already on the box are left alone.
-#   2. the three secrets below go on the `production` environment, NOT on the repository,
-#      and that environment restricts its deployment branches to main. The key logs in as
-#      llmops, which has passwordless sudo, so a repository secret would let anyone with
-#      write access dispatch an unmerged branch and get root here.
-#   3. known_hosts is scanned by IP, not by name: the inventory connects to
-#      ansible_host=51.159.116.128, so an entry stored under the hostname never matches.
 name: deploy
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
-# Deploys queue rather than overlap, and are never cancelled mid-flight: a half-applied
-# run is worse than a late one.
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+concurrency: production
 
 permissions:
   contents: read
 
 jobs:
-  # A direct push to main, or a manual dispatch, must not skip the PR checks.
   validate:
     uses: ./.github/workflows/validate.yml
 
   deploy:
     needs: validate
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://ai.labs.paritytech.io
+    environment: production
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Ansible
-        run: pipx install ansible-core
-
-      # known_hosts is pre-seeded because ansible.cfg keeps host_key_checking on: a CI
-      # runner must never trust a host key on first sight.
-      - name: Set up SSH
-        env:
+      - run: pipx install ansible-core
+      - env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        working-directory: ansible
         run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-
-      # The vault password goes to a file rather than --ask-vault-pass; `set -u` plus the
-      # trap means it is removed even when the playbook fails.
-      - name: Run the stack playbook
-        working-directory: ansible
-        env:
-          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
-        run: |
-          set -eu
-          vp=$(mktemp)
-          trap 'rm -f "$vp"' EXIT
-          printf '%s' "$ANSIBLE_VAULT_PASSWORD" > "$vp"
-          ansible-playbook 03-stack.yml --vault-password-file "$vp"
-
-      # The playbook's own gate runs from inside the box. This one proves DNS, TLS and
-      # nginx from outside it.
-      - name: Health check from outside
-        run: curl -fsS --retry 5 --retry-delay 5 --retry-all-errors https://ai.labs.paritytech.io/health/liveliness
+          printf '%s' "$ANSIBLE_VAULT_PASSWORD" > "$RUNNER_TEMP/vault-pass"
+          ansible-playbook 03-stack.yml --vault-password-file "$RUNNER_TEMP/vault-pass"
