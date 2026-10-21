@@ -4,7 +4,7 @@
 name: team-llm
 services:
   litellm:
-    image: ghcr.io/berriai/litellm-database:v1.100.3   # PINNED — never latest/main-latest (breaking changes ship in releases)
+    image: ghcr.io/berriai/litellm-database:v1.103.6   # PINNED — never latest/main-latest (breaking changes ship in releases)
     restart: unless-stopped
     env_file: [.env]
     volumes:
