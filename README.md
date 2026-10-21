@@ -257,8 +257,9 @@ internet ──80/443──> nginx (host, certbot) ──> 127.0.0.1:4000 ──
 
 1. **The machine is Ansible's.** `ansible-playbook site.yml` takes a bootstrapped Ubuntu host to
    a serving proxy, and is safe to re-run — a second run should report no changes.
-2. **Merging a PR deploys nothing.** There is no CI deploy path and no deploy credentials in
-   this repo. A merged change reaches the box when an operator runs the relevant playbook.
+2. **Merging to `main` deploys the stack.** `.github/workflows/deploy.yml` runs
+   `03-stack.yml` on every push to `main`. The other phases are manual: a change to the box,
+   nginx or the tunnel reaches the host when an operator runs that playbook.
 3. **The model menu lives in the admin UI**, stored in Postgres (`store_model_in_db: true`), not
    in `config.yaml`. Adding a model is a UI action. `RUNBOOK.md` § "Model menu" is the written
    record of what the UI should contain, and the thing to replay if the database is ever lost.
@@ -316,8 +317,11 @@ See `RUNBOOK.md` for the full mint → use → track → revoke walkthrough.
   their own scoped virtual keys. Models added in the admin UI reference a named credential
   from `config.yaml`, whose values are `os.environ/…` references — so a database dump contains
   credential *names*, not secrets.
-- **No deploy credentials anywhere.** There is no CI key with access to the box; deployment is
-  an operator running a playbook over their own SSH access.
+- **One deploy credential, and it only runs the stack phase.** GitHub Actions holds an SSH key
+  for the `llmops` account. That account has passwordless sudo, so the key is root on the box;
+  what limits it is where it is stored. It lives on the `production` GitHub environment, whose
+  deployment branches are restricted to `main`, so no unmerged branch can reach it. Every other
+  phase is still an operator running a playbook over their own SSH access.
 - **SSH:** key authentication only. Root login and password authentication are disabled by
   `01-box.yml`, which can only run as the admin account — so the account that replaces root is
   proven working before root is taken away.

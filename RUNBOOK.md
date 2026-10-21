@@ -4,8 +4,8 @@ Operating guide for `https://ai.labs.paritytech.io`. Everything the machine need
 `ansible/`; this document covers what a playbook cannot do for you — the one-time setup, the
 model menu, the key lifecycle, and what to do when something breaks.
 
-**Nothing here is triggered by merging a PR.** There is no CI deploy path. Changes reach the
-box when an operator runs a playbook.
+**Merging to `main` runs `03-stack.yml` automatically** (`.github/workflows/deploy.yml`).
+Everything else here is manual: those changes reach the box when an operator runs a playbook.
 
 ---
 

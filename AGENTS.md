@@ -39,9 +39,9 @@ This config drives a **live, shared production service**. Treat changes accordin
   nginx, TLS, users, firewall, systemd units — belongs in `ansible/`, not in a shell script and
   not in a runbook step. If you find yourself writing "then run this command on the box", it
   probably belongs in a role.
-- **Merging a PR deploys nothing.** There is no CI deploy path and no deploy credentials in this
-  repo. Changes reach the box when an operator runs a playbook. Never suggest "merge and it'll
-  go live".
+- **Merging to `main` deploys the stack, and only the stack.** `.github/workflows/deploy.yml`
+  runs `03-stack.yml` on push. A change to the box, nginx or the tunnel reaches the host when an
+  operator runs that playbook, so never say "merge and it'll go live" about those.
 - **Public URLs live in exactly one place:** `public_hostname` in
   `ansible/group_vars/all/vars.yml`. Changing the service's URL is that line, a DNS record, and
   a re-run of `02-nginx.yml`. Nothing else hardcodes it — keep it that way.
@@ -112,9 +112,10 @@ This config drives a **live, shared production service**. Treat changes accordin
 
 ## Deploy model (so you don't suggest the wrong thing)
 
-- The host runs the stack from `/opt/team-llm`, but **nothing gets there by merging.** An
-  operator runs `ansible-playbook 03-stack.yml` (or whichever phase owns the change) from their
-  own machine, over their own SSH access.
+- The host runs the stack from `/opt/team-llm`. A push to `main` runs `03-stack.yml` from
+  GitHub Actions, so `config.yaml`, `docker-compose.yml` and the rendered `.env` ship on merge.
+  Any other phase is an operator running `ansible-playbook` from their own machine, over their
+  own SSH access.
 - Phases are independently re-runnable and ordered by dependency. `00-bootstrap.yml` is the
   exception: it connects as root, runs once, and `01-box.yml` disables root login afterwards —
   which is the mechanism that proves the replacement account works before root goes away.
