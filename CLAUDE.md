@@ -35,8 +35,10 @@ Parity's own vLLM GPU pod over a reverse SSH tunnel. It drives a **live producti
 
 ## Working here
 
-- **Merging a PR deploys nothing.** There is no CI deploy path. Never tell the user a change
-  will "go live on merge" — an operator runs the relevant playbook.
+- **Merging to `main` deploys the stack phase only.** `.github/workflows/deploy.yml` runs
+  `03-stack.yml` on push, so `config.yaml`, `docker-compose.yml` and `.env` values do go live on
+  merge. Changes under `roles/base`, `roles/nginx` or `roles/vllm_tunnel` do not: an operator
+  runs that playbook.
 - **Box configuration belongs in a role.** If the answer to a request is "then run this on the
   box", it belongs in `ansible/`, not in `RUNBOOK.md`. Playbooks must be idempotent: a second
   run reports zero changed tasks.
